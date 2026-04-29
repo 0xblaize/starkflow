@@ -25,7 +25,18 @@ const nextConfig: NextConfig = {
     "@hyperlane-xyz/registry",
     "@hyperlane-xyz/utils",
     "ethers",
+    "starkzap",
   ],
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals = config.externals || {};
+      config.externals = {
+        ...config.externals,
+        "@solana/web3.js": "@solana/web3.js",
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
