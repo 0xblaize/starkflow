@@ -1,10 +1,4 @@
 import { RpcProvider } from "starknet";
-import { Wallet } from "starkzap/dist/src/wallet/index.js";
-import { PrivySigner } from "starkzap/dist/src/signer/index.js";
-import { ArgentXV050Preset } from "starkzap/dist/src/account/presets.js";
-import { ChainId } from "starkzap/dist/src/types/config.js";
-import { mainnetTokens } from "starkzap/dist/src/erc20/token/presets.js";
-import { sepoliaTokens } from "starkzap/dist/src/erc20/token/presets.sepolia.js";
 import { normalizePreferredNetwork } from "@/lib/app-user";
 import { getPrivyClient } from "@/lib/privy-client";
 import { prisma } from "@/lib/prisma";
@@ -23,28 +17,51 @@ type InitStarkFlowOptions = {
 
 const avnuApiKey = process.env.AVNU_PAYMASTER_API_KEY;
 
-const NETWORK_CONFIG: Record<
-  SupportedNetwork,
-  {
-    rpcUrl: string;
-    chainId: InstanceType<typeof ChainId>;
-    explorerUrl: string;
+// Lazy load starkzap to avoid bundling it at build time
+let cachedStarkzap: any = null;
+
+async function getStarkzap() {
+  if (!cachedStarkzap) {
+    const [wallet, signer, presets, config, tokens, tokensSepolia] = await Promise.all([
+      import("starkzap/dist/src/wallet/index.js"),
+      import("starkzap/dist/src/signer/index.js"),
+      import("starkzap/dist/src/account/presets.js"),
+      import("starkzap/dist/src/types/config.js"),
+      import("starkzap/dist/src/erc20/token/presets.js"),
+      import("starkzap/dist/src/erc20/token/presets.sepolia.js"),
+    ]);
+
+    cachedStarkzap = {
+      Wallet: wallet.Wallet,
+      PrivySigner: signer.PrivySigner,
+      ArgentXV050Preset: presets.ArgentXV050Preset,
+      ChainId: config.ChainId,
+      mainnetTokens: tokens.mainnetTokens,
+      sepoliaTokens: tokensSepolia.sepoliaTokens,
+    };
   }
-> = {
-  sepolia: {
-    rpcUrl:
-      process.env.STARKNET_RPC_URL ??
-      "https://starknet-sepolia.public.blastapi.io",
-    chainId: ChainId.SEPOLIA,
-    explorerUrl: "https://sepolia.voyager.online",
-  },
-  mainnet: {
-    rpcUrl:
-      process.env.STARKNET_MAINNET_RPC_URL ??
-      "https://starknet-mainnet.public.blastapi.io",
-    chainId: ChainId.MAINNET,
-    explorerUrl: "https://voyager.online",
-  },
+  return cachedStarkzap;
+}
+
+const NETWORK_CONFIG = async () => {
+  const { ChainId } = await getStarkzap();
+
+  return {
+    sepolia: {
+      rpcUrl:
+        process.env.STARKNET_RPC_URL ??
+        "https://starknet-sepolia.public.blastapi.io",
+      chainId: ChainId.SEPOLIA,
+      explorerUrl: "https://sepolia.voyager.online",
+    },
+    mainnet: {
+      rpcUrl:
+        process.env.STARKNET_MAINNET_RPC_URL ??
+        "https://starknet-mainnet.public.blastapi.io",
+      chainId: ChainId.MAINNET,
+      explorerUrl: "https://voyager.online",
+    },
+  } as const;
 };
 
 function buildPaymaster(network: SupportedNetwork) {
@@ -117,14 +134,15 @@ async function connectPrivyStarknetWallet(
   userJwt: string,
   deploy: InitStarkFlowOptions["deploy"] = "if_needed",
 ) {
+  const { Wallet, PrivySigner, ArgentXV050Preset, ChainId } = await getStarkzap();
   const privy = getPrivyClient();
-  const config = NETWORK_CONFIG[network];
+  const config = (await NETWORK_CONFIG())[network];
   const provider = new RpcProvider({ nodeUrl: config.rpcUrl });
 
   const signer = new PrivySigner({
     walletId: walletMetadata.walletId,
     publicKey: walletMetadata.publicKey,
-    rawSign: async (walletId, hash) => {
+    rawSign: async (walletId: string, hash: string) => {
       const { signature } = await privy.wallets().rawSign(walletId, {
         authorization_context: {
           user_jwts: [userJwt],
@@ -171,6 +189,7 @@ export async function initStarkFlow(
   userJwt: string,
   options: InitStarkFlowOptions = {},
 ) {
+  const { mainnetTokens, sepoliaTokens } = await getStarkzap();
   const user = await prisma.user.findUnique({
     where: { id: userId },
   });
