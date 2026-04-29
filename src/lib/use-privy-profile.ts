@@ -15,6 +15,47 @@ export type PrivyProfileState = {
   username?: string | null;
 };
 
+const profileMemoryCache = new Map<string, PrivyProfileState>();
+
+function getProfileCacheKey(userId?: string | null) {
+  return userId ? `starkflow:profile:${userId}` : null;
+}
+
+function readCachedProfile(userId?: string | null) {
+  const cacheKey = getProfileCacheKey(userId);
+  if (!cacheKey) return null;
+
+  const inMemory = profileMemoryCache.get(cacheKey);
+  if (inMemory) return inMemory;
+
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PrivyProfileState;
+    profileMemoryCache.set(cacheKey, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedProfile(userId: string | null | undefined, profile: PrivyProfileState) {
+  const cacheKey = getProfileCacheKey(userId);
+  if (!cacheKey) return;
+
+  profileMemoryCache.set(cacheKey, profile);
+
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.setItem(cacheKey, JSON.stringify(profile));
+  } catch {
+    // Ignore storage failures and keep the in-memory cache.
+  }
+}
+
 export function usePrivyProfile() {
   const { authenticated, getAccessToken, logout, ready, user } = usePrivy();
   const router = useRouter();
@@ -31,9 +72,21 @@ export function usePrivyProfile() {
     if (!ready || !authenticated) return;
 
     let cancelled = false;
+    const cachedProfile = readCachedProfile(user?.id);
+
+    if (cachedProfile) {
+      setProfile(cachedProfile);
+      setLoadingProfile(false);
+
+      if (!cachedProfile.onboarded) {
+        router.push("/setup-profile");
+      }
+    }
 
     async function loadProfile() {
-      setLoadingProfile(true);
+      if (!cachedProfile) {
+        setLoadingProfile(true);
+      }
 
       try {
         const token = await waitForPrivyAccessToken(getAccessToken);
@@ -62,6 +115,7 @@ export function usePrivyProfile() {
           return;
         }
 
+        writeCachedProfile(user?.id, nextProfile);
         setProfile(nextProfile);
       } catch (error) {
         console.error("[usePrivyProfile] profile load error:", error);
@@ -77,7 +131,7 @@ export function usePrivyProfile() {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, getAccessToken, ready, router]);
+  }, [authenticated, getAccessToken, ready, router, user?.id]);
 
   return {
     authenticated,

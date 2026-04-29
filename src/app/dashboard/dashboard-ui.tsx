@@ -26,11 +26,15 @@ type DashboardViewProps = {
 };
 
 type LiveBalances = {
+  address?: string | null;
+  fetchedAt?: number;
+  network?: string;
   strk: string;
   usdc: string;
   strkbtc: string;
-  network?: string;
 };
+
+const balanceMemoryCache = new Map<string, LiveBalances>();
 
 export function DashboardView({
   signOutAction,
@@ -47,6 +51,24 @@ export function DashboardView({
   });
 
   const fetchBalances = useCallback(async () => {
+    if (!starknetAddress) {
+      setBalances({
+        address: null,
+        network: preferredNetwork,
+        strk: "0.0000 STRK",
+        usdc: "0.00 USDC",
+        strkbtc: "0.0000 strkBTC",
+      });
+      return;
+    }
+
+    const cacheKey = `${preferredNetwork}:${starknetAddress}`;
+    const cached = balanceMemoryCache.get(cacheKey);
+
+    if (cached) {
+      setBalances(cached);
+    }
+
     try {
       const token = await waitForPrivyAccessToken(getAccessToken);
       if (!token) return;
@@ -58,16 +80,21 @@ export function DashboardView({
       });
       if (res.ok) {
         const data: LiveBalances = await res.json();
-        setBalances(data);
+        const nextBalances = { ...data, fetchedAt: Date.now() };
+        balanceMemoryCache.set(cacheKey, nextBalances);
+        setBalances(nextBalances);
       }
     } catch {
       // silently ignore — balances stay at last known value
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, preferredNetwork, starknetAddress]);
 
   useEffect(() => {
     void fetchBalances();
-    const interval = setInterval(() => void fetchBalances(), 10_000);
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      void fetchBalances();
+    }, 30_000);
     return () => clearInterval(interval);
   }, [fetchBalances]);
 

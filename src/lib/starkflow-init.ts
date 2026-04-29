@@ -23,12 +23,12 @@ let cachedStarkzap: any = null;
 async function getStarkzap() {
   if (!cachedStarkzap) {
     const [wallet, signer, presets, config, tokens, tokensSepolia] = await Promise.all([
-      import("starkzap/dist/src/wallet/index.js"),
-      import("starkzap/dist/src/signer/index.js"),
-      import("starkzap/dist/src/account/presets.js"),
-      import("starkzap/dist/src/types/config.js"),
-      import("starkzap/dist/src/erc20/token/presets.js"),
-      import("starkzap/dist/src/erc20/token/presets.sepolia.js"),
+      import("../../node_modules/starkzap/dist/src/wallet/index.js"),
+      import("../../node_modules/starkzap/dist/src/signer/index.js"),
+      import("../../node_modules/starkzap/dist/src/account/presets.js"),
+      import("../../node_modules/starkzap/dist/src/types/config.js"),
+      import("../../node_modules/starkzap/dist/src/erc20/token/presets.js"),
+      import("../../node_modules/starkzap/dist/src/erc20/token/presets.sepolia.js"),
     ]);
 
     cachedStarkzap = {
@@ -50,14 +50,14 @@ const NETWORK_CONFIG = async () => {
     sepolia: {
       rpcUrl:
         process.env.STARKNET_RPC_URL ??
-        "https://starknet-sepolia.public.blastapi.io",
+        "https://starknet-sepolia.g.alchemy.com/v2/docs-demo",
       chainId: ChainId.SEPOLIA,
       explorerUrl: "https://sepolia.voyager.online",
     },
     mainnet: {
       rpcUrl:
         process.env.STARKNET_MAINNET_RPC_URL ??
-        "https://starknet-mainnet.public.blastapi.io",
+        "https://starknet-mainnet.g.alchemy.com/v2/docs-demo",
       chainId: ChainId.MAINNET,
       explorerUrl: "https://voyager.online",
     },

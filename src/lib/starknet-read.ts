@@ -15,12 +15,12 @@ const NETWORK_CONFIG: Record<Network, { rpcUrl: string }> = {
   sepolia: {
     rpcUrl:
       process.env.STARKNET_RPC_URL ??
-      "https://starknet-sepolia.public.blastapi.io",
+      "https://starknet-sepolia.g.alchemy.com/v2/docs-demo",
   },
   mainnet: {
     rpcUrl:
       process.env.STARKNET_MAINNET_RPC_URL ??
-      "https://starknet-mainnet.public.blastapi.io",
+      "https://starknet-mainnet.g.alchemy.com/v2/docs-demo",
   },
 };
 

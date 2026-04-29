@@ -1,11 +1,11 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useCallback, useState } from "react";
 import { DashboardView } from "./dashboard-ui";
 import { normalizePreferredNetwork } from "@/lib/app-user";
 import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
+import { usePrivyProfile } from "@/lib/use-privy-profile";
 
 type OnboardResult = {
   address: string;
@@ -13,89 +13,25 @@ type OnboardResult = {
   deployed: boolean;
 };
 
-type ProfileStatus = {
-  onboarded: boolean;
-  preferredNetwork?: "sepolia" | "mainnet";
-  starknetAddress?: string | null;
-};
-
 export default function DashboardPage() {
-  const { ready, authenticated, user, logout, getAccessToken } = usePrivy();
+  const { authenticated, getAccessToken, loadingProfile, logout, profile, ready, user } =
+    usePrivyProfile();
   const router = useRouter();
 
-  const [starknetAddress, setStarknetAddress] = useState<string | null>(null);
-  const [network, setNetwork] = useState<"sepolia" | "mainnet">("sepolia");
+  const [starknetAddress, setStarknetAddress] = useState<string | null>(profile?.starknetAddress ?? null);
+  const [network, setNetwork] = useState<"sepolia" | "mainnet">(
+    normalizePreferredNetwork(profile?.preferredNetwork),
+  );
   const [walletDeployed, setWalletDeployed] = useState<boolean | null>(null);
   const [onboarding, setOnboarding] = useState(false);
-  const [checkingProfile, setCheckingProfile] = useState(true);
-
-  // Redirect to auth if not logged in
-  useEffect(() => {
-    if (ready && !authenticated) {
-      router.push("/auth");
-    }
-  }, [ready, authenticated, router]);
 
   useEffect(() => {
-    if (!ready || !authenticated) return;
+    if (!profile) return;
 
-    let cancelled = false;
+    setStarknetAddress(profile.starknetAddress ?? null);
+    setNetwork(normalizePreferredNetwork(profile.preferredNetwork));
+  }, [profile]);
 
-    async function ensureProfileComplete() {
-      setCheckingProfile(true);
-
-      try {
-        const token = await waitForPrivyAccessToken(getAccessToken);
-
-        if (!token) {
-          throw new Error("Privy access token was not ready");
-        }
-
-        const response = await fetch("/api/profile", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch profile");
-        }
-
-        const profile: ProfileStatus = await response.json();
-
-        if (cancelled) return;
-
-        if (!profile.onboarded) {
-          router.push("/setup-profile");
-          return;
-        }
-
-        if (profile.starknetAddress) {
-          setStarknetAddress(profile.starknetAddress);
-        }
-
-        if (profile.preferredNetwork) {
-          setNetwork(normalizePreferredNetwork(profile.preferredNetwork));
-        }
-
-        setCheckingProfile(false);
-      } catch (error) {
-        console.error("[dashboard] profile check error:", error);
-        if (!cancelled) {
-          setCheckingProfile(false);
-        }
-      }
-    }
-
-    void ensureProfileComplete();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, authenticated, getAccessToken, router]);
-
-  // Onboard wallet once authenticated
   const onboard = useCallback(async () => {
     if (!authenticated) return;
     setOnboarding(true);
@@ -124,17 +60,19 @@ export default function DashboardPage() {
   }, [authenticated, getAccessToken]);
 
   useEffect(() => {
-    if (authenticated && !checkingProfile) {
-      void onboard();
-    }
-  }, [authenticated, checkingProfile, onboard]);
+    if (!authenticated || loadingProfile || !profile) return;
+    if (profile.starknetAddress) return;
+    if (onboarding) return;
+
+    void onboard();
+  }, [authenticated, loadingProfile, onboard, onboarding, profile]);
 
   const handleSignOut = useCallback(async () => {
     await logout();
     router.push("/");
   }, [logout, router]);
 
-  if (!ready || !authenticated || checkingProfile) {
+  if (!ready || !authenticated || loadingProfile || !profile) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#040507] text-white">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#3151ff] border-t-transparent" />
