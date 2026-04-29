@@ -1,10 +1,10 @@
 import { RpcProvider } from "starknet";
-import { Wallet } from "../../node_modules/starkzap/dist/src/wallet/index.js";
-import { PrivySigner } from "../../node_modules/starkzap/dist/src/signer/index.js";
-import { ArgentXV050Preset } from "../../node_modules/starkzap/dist/src/account/presets.js";
-import { ChainId } from "../../node_modules/starkzap/dist/src/types/config.js";
-import { mainnetTokens } from "../../node_modules/starkzap/dist/src/erc20/token/presets.js";
-import { sepoliaTokens } from "../../node_modules/starkzap/dist/src/erc20/token/presets.sepolia.js";
+import { Wallet } from "starkzap/dist/src/wallet/index.js";
+import { PrivySigner } from "starkzap/dist/src/signer/index.js";
+import { ArgentXV050Preset } from "starkzap/dist/src/account/presets.js";
+import { ChainId } from "starkzap/dist/src/types/config.js";
+import { mainnetTokens } from "starkzap/dist/src/erc20/token/presets.js";
+import { sepoliaTokens } from "starkzap/dist/src/erc20/token/presets.sepolia.js";
 import { normalizePreferredNetwork } from "@/lib/app-user";
 import { getPrivyClient } from "@/lib/privy-client";
 import { prisma } from "@/lib/prisma";

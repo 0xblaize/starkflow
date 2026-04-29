@@ -16,8 +16,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '10mb',
     },
   },
-  // Exclude optional starkzap peer deps that aren't installed
+  // Externalize packages that have external dependencies
   serverExternalPackages: [
+    "starkzap",
     "@fatsolutions/tongo-sdk",
     "@cartridge/controller",
     "@solana/web3.js",
@@ -25,18 +26,7 @@ const nextConfig: NextConfig = {
     "@hyperlane-xyz/registry",
     "@hyperlane-xyz/utils",
     "ethers",
-    "starkzap",
   ],
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals = config.externals || {};
-      config.externals = {
-        ...config.externals,
-        "@solana/web3.js": "@solana/web3.js",
-      };
-    }
-    return config;
-  },
 };
 
 export default nextConfig;

@@ -1,0 +1,5 @@
+.env.local
+.git
+.next
+.eslintcache
+node_modules
