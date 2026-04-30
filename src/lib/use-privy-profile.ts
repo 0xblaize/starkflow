@@ -103,7 +103,13 @@ export function usePrivyProfile() {
         });
 
         if (!response.ok) {
-          throw new Error("Failed to fetch profile");
+          const payload = (await response.json().catch(() => null)) as
+            | { details?: string; error?: string }
+            | null;
+          const detail = payload?.details ?? payload?.error ?? "Unknown profile error";
+          throw new Error(
+            `Failed to fetch profile (${response.status}): ${detail}`,
+          );
         }
 
         const nextProfile: PrivyProfileState = await response.json();
@@ -118,7 +124,12 @@ export function usePrivyProfile() {
         writeCachedProfile(user?.id, nextProfile);
         setProfile(nextProfile);
       } catch (error) {
-        console.error("[usePrivyProfile] profile load error:", error);
+        if (cachedProfile) {
+          console.warn("[usePrivyProfile] profile refresh failed, using cached profile:", error);
+          setProfile(cachedProfile);
+        } else {
+          console.error("[usePrivyProfile] profile load error:", error);
+        }
       } finally {
         if (!cancelled) {
           setLoadingProfile(false);

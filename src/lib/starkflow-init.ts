@@ -50,14 +50,14 @@ const NETWORK_CONFIG = async () => {
     sepolia: {
       rpcUrl:
         process.env.STARKNET_RPC_URL ??
-        "https://starknet-sepolia.g.alchemy.com/v2/docs-demo",
+        "https://free-rpc.nethermind.io/sepolia-juno/v0_7",
       chainId: ChainId.SEPOLIA,
       explorerUrl: "https://sepolia.voyager.online",
     },
     mainnet: {
       rpcUrl:
         process.env.STARKNET_MAINNET_RPC_URL ??
-        "https://starknet-mainnet.g.alchemy.com/v2/docs-demo",
+        "https://free-rpc.nethermind.io/mainnet-juno/v0_7",
       chainId: ChainId.MAINNET,
       explorerUrl: "https://voyager.online",
     },
@@ -131,7 +131,6 @@ async function ensurePrivyStarknetWallet(privyUserId: string) {
 async function connectPrivyStarknetWallet(
   network: SupportedNetwork,
   walletMetadata: WalletMetadata,
-  userJwt: string,
   deploy: InitStarkFlowOptions["deploy"] = "if_needed",
 ) {
   const { Wallet, PrivySigner, ArgentXV050Preset, ChainId } = await getStarkzap();
@@ -144,11 +143,7 @@ async function connectPrivyStarknetWallet(
     publicKey: walletMetadata.publicKey,
     rawSign: async (walletId: string, hash: string) => {
       const { signature } = await privy.wallets().rawSign(walletId, {
-        authorization_context: {
-          user_jwts: [userJwt],
-        },
         params: { hash },
-        request_expiry: privy.getRequestExpiry(),
       });
 
       return signature;
@@ -186,7 +181,6 @@ async function connectPrivyStarknetWallet(
 
 export async function initStarkFlow(
   userId: string,
-  userJwt: string,
   options: InitStarkFlowOptions = {},
 ) {
   const { mainnetTokens, sepoliaTokens } = await getStarkzap();
@@ -225,7 +219,6 @@ export async function initStarkFlow(
   const { wallet, deployed } = await connectPrivyStarknetWallet(
     network,
     walletMetadata,
-    userJwt,
     options.deploy ?? "if_needed",
   );
 

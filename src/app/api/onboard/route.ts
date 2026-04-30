@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing Privy bearer token" }, { status: 401 });
     }
 
-    const flow = await initStarkFlow(appUser.id, userJwt);
+    const flow = await initStarkFlow(appUser.id);
 
     return NextResponse.json({
       address: flow.address,

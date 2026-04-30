@@ -1,17 +1,10 @@
 export const moveTabs = [
   { label: "Home", href: "/dashboard", icon: "home", active: false },
   { label: "Move", href: "/move", icon: "move", active: true },
-  { label: "Predict", href: "#", icon: "predict", active: false },
-  { label: "Me", href: "#", icon: "user", active: false },
+  { label: "Predict", href: "/predict", icon: "predict", active: false },
+  { label: "Me", href: "/me", icon: "user", active: false },
 ] as const;
 export type MoveTab = (typeof moveTabs)[number];
-
-export const sendRecipients = [
-  "@stark_king",
-  "@alice_layer",
-  "0x12...b94a",
-  "wallet pending",
-] as const;
 
 export const programs = [
   {

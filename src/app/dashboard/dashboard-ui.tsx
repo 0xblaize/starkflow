@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { TopbarAppShell } from "@/components/app-shell/shell";
-import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
 import {
   dashboardTabs,
   feedEmptyStates,
@@ -32,9 +31,43 @@ type LiveBalances = {
   strk: string;
   usdc: string;
   strkbtc: string;
+  portfolioStrkbtc?: string;
+  usdTotal?: string;
+  strkPriceUsd?: string | null;
+  btcPriceUsd?: string | null;
+};
+
+type ActivityItem = {
+  amount: string;
+  blockNumber: number;
+  counterpartyAddress?: string;
+  counterpartyLabel?: string;
+  contractAddress: string;
+  direction: "received" | "sent";
+  fromAddress?: string;
+  id: string;
+  kind?: "deposit" | "internal_transfer" | "transfer";
+  symbol: string;
+  toAddress?: string;
+  txHash: string;
 };
 
 const balanceMemoryCache = new Map<string, LiveBalances>();
+const activityMemoryCache = new Map<string, ActivityItem[]>();
+
+function parseNumericValue(value?: string | null) {
+  if (!value) return 0;
+
+  const numeric = Number.parseFloat(value.split(" ")[0] ?? value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function formatUsdValue(value: number) {
+  return `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 export function DashboardView({
   signOutAction,
@@ -48,7 +81,12 @@ export function DashboardView({
     strk: "—",
     usdc: "—",
     strkbtc: "—",
+    portfolioStrkbtc: "0.000000",
+    usdTotal: "0.00",
+    strkPriceUsd: null,
+    btcPriceUsd: null,
   });
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   const fetchBalances = useCallback(async () => {
     if (!starknetAddress) {
@@ -58,6 +96,10 @@ export function DashboardView({
         strk: "0.0000 STRK",
         usdc: "0.00 USDC",
         strkbtc: "0.0000 strkBTC",
+        portfolioStrkbtc: "0.000000",
+        usdTotal: "0.00",
+        strkPriceUsd: null,
+        btcPriceUsd: null,
       });
       return;
     }
@@ -70,13 +112,12 @@ export function DashboardView({
     }
 
     try {
-      const token = await waitForPrivyAccessToken(getAccessToken);
-      if (!token) return;
-
-      const res = await fetch("/api/balances", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const params = new URLSearchParams({
+        address: starknetAddress,
+        network: preferredNetwork,
+      });
+      const res = await fetch(`/api/balances?${params.toString()}`, {
+        cache: "no-store",
       });
       if (res.ok) {
         const data: LiveBalances = await res.json();
@@ -87,7 +128,7 @@ export function DashboardView({
     } catch {
       // silently ignore — balances stay at last known value
     }
-  }, [getAccessToken, preferredNetwork, starknetAddress]);
+  }, [preferredNetwork, starknetAddress]);
 
   useEffect(() => {
     void fetchBalances();
@@ -97,6 +138,48 @@ export function DashboardView({
     }, 30_000);
     return () => clearInterval(interval);
   }, [fetchBalances]);
+
+  const fetchActivity = useCallback(async () => {
+    if (!starknetAddress) {
+      setActivity([]);
+      return;
+    }
+
+    const cacheKey = `${preferredNetwork}:${starknetAddress}`;
+    const cached = activityMemoryCache.get(cacheKey);
+
+    if (cached) {
+      setActivity(cached);
+    }
+
+    try {
+      const params = new URLSearchParams({
+        address: starknetAddress,
+        network: preferredNetwork,
+      });
+      const res = await fetch(`/api/activity?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { activity?: ActivityItem[] };
+        const nextActivity = data.activity ?? [];
+        activityMemoryCache.set(cacheKey, nextActivity);
+        setActivity(nextActivity);
+      }
+    } catch {
+      // Keep the last known activity list on transient RPC failures.
+    }
+  }, [preferredNetwork, starknetAddress]);
+
+  useEffect(() => {
+    void fetchActivity();
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      void fetchActivity();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchActivity]);
 
   return (
     <TopbarAppShell
@@ -128,7 +211,7 @@ export function DashboardView({
         </aside>
       </div>
 
-      <ActivityPanel />
+      <ActivityPanel activity={activity} preferredNetwork={preferredNetwork} />
     </TopbarAppShell>
   );
 }
@@ -227,6 +310,7 @@ function TopHero({
 }) {
   const networkLabel =
     preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia Testnet";
+  const totalUsdValue = formatUsdValue(parseNumericValue(balances.usdTotal));
   return (
     <section className="rounded-[22px] border border-[#1637c0] bg-[linear-gradient(135deg,#0a1d92_0%,#1328a7_48%,#13208a_100%)] px-6 py-6 shadow-[0_24px_70px_rgba(24,45,180,0.26)] md:px-8 md:py-8">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_560px] lg:items-center">
@@ -236,20 +320,28 @@ function TopHero({
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <h2 className="[font-family:var(--font-syne)] text-[44px] leading-none tracking-[-0.05em] md:text-[58px]">
-              {balances.strkbtc.split(" ")[0] ?? "0.0000"}
+              {balances.portfolioStrkbtc ?? balances.strkbtc.split(" ")[0] ?? "0.0000"}
             </h2>
             <span className="pb-1 text-[18px] font-semibold text-[#a9baff]">
               strkBTC
             </span>
           </div>
+          <p className="mt-3 text-[15px] font-semibold text-white/90">
+            {totalUsdValue} total wallet value
+          </p>
           <p className="mt-2 text-[13px] font-semibold text-[#94a9ff]">
             {networkLabel} · Gas Sponsored
           </p>
-      <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-wrap gap-3">
             <HeroActionButton href="/move?tab=bridge" tone="primary">
               Bridge BTC
             </HeroActionButton>
-            <HeroActionButton href="/move?tab=swap">Swap Assets</HeroActionButton>
+            <HeroActionButton href="/move?tab=swap">
+              Swap Assets
+            </HeroActionButton>
+            <HeroActionButton href="/predict">
+              Predict Market
+            </HeroActionButton>
             <Link
               href="/move?tab=send"
               className="inline-flex items-center gap-2 px-3 py-3 text-[14px] font-semibold text-white"
@@ -317,6 +409,10 @@ function OnchainAssetsPanel({
   preferredNetwork?: string;
 }) {
   const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Testnet";
+  const strkAmount = parseNumericValue(balances.strk);
+  const usdcAmount = parseNumericValue(balances.usdc);
+  const strkPriceUsd = parseNumericValue(balances.strkPriceUsd);
+  const totalUsdValue = parseNumericValue(balances.usdTotal);
 
   // Merge live balances and inject the correct network label into the static asset list
   const liveAssets = onchainAssets.map((asset) => {
@@ -326,18 +422,27 @@ function OnchainAssetsPanel({
         ...asset,
         balance: balances.strk.split(" ")[0] ?? asset.balance,
         network: netLabel,
+        status:
+          strkAmount > 0 && strkPriceUsd > 0
+            ? `${formatUsdValue(strkAmount * strkPriceUsd)} tracked value`
+            : asset.status,
       };
     if (asset.symbol === "USDC")
       return {
         ...asset,
         balance: balances.usdc.split(" ")[0] ?? asset.balance,
         network: netLabel,
+        status:
+          usdcAmount > 0
+            ? `${formatUsdValue(usdcAmount)} stable value`
+            : asset.status,
       };
     if (asset.symbol === "strkBTC")
       return {
         ...asset,
-        balance: balances.strkbtc.split(" ")[0] ?? asset.balance,
+        balance: balances.portfolioStrkbtc ?? asset.balance,
         network: netLabel,
+        status: `${formatUsdValue(totalUsdValue)} portfolio equivalent`,
       };
     return { ...asset, network: netLabel };
   });
@@ -426,12 +531,24 @@ function AssetBadge({ asset }: { asset: OnchainAsset }) {
     gold: "bg-[#8f5a13] text-[#ffe8b5]",
     neutral: "bg-[#2a2f3a] text-[#d7dceb]",
   } as const;
+  const iconSrc = (asset as OnchainAsset & { iconSrc?: string }).iconSrc;
+ 
 
   return (
     <span
-      className={`inline-flex h-10 w-10 items-center justify-center rounded-full text-[12px] font-bold ${toneMap[asset.tone]}`}
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-full text-[12px] font-bold `}
     >
-      {asset.symbol.slice(0, 2)}
+      {iconSrc ? (
+        <Image
+          src={iconSrc}
+          alt={`${asset.symbol} icon`}
+          width={28}
+          height={28}
+          className="h-7 w-7 rounded-full object-contain"
+        />
+      ) : (
+        asset.symbol.slice(0, 2)
+      )}
     </span>
   );
 }
@@ -609,11 +726,27 @@ function SearchUsersPanel() {
   );
 }
 
-function ActivityPanel() {
+function ActivityPanel({
+  activity,
+  preferredNetwork,
+}: {
+  activity: ActivityItem[];
+  preferredNetwork?: "sepolia" | "mainnet";
+}) {
+  const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia";
+  const [visibleCount, setVisibleCount] = useState(5);
+
+  useEffect(() => {
+    setVisibleCount(5);
+  }, [activity]);
+
+  const visibleActivity = activity.slice(0, visibleCount);
+  const hasMore = activity.length > visibleCount;
+
   return (
     <section className="mt-8">
       <h3 className="[font-family:var(--font-syne)] text-[24px] font-semibold md:text-[26px]">
-        Social Activity
+        Transaction Tracker
       </h3>
 
       <div className="mt-4 overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
@@ -623,28 +756,93 @@ function ActivityPanel() {
           </p>
         </div>
 
-        <div className="px-6 py-8">
-          <div className="mx-auto max-w-[820px] text-center">
-            <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#111726] text-[#6788ff]">
-              <PulseIcon />
-            </span>
-            <p className="mt-4 [font-family:var(--font-syne)] text-[24px] leading-none">
-              No verified activity yet
-            </p>
+        {activity.length > 0 ? (
+          <div className="divide-y divide-[#2a303a]">
+            {visibleActivity.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-4 px-6 py-5"
+              >
+                <div className="min-w-0">
+                  <p className="text-[15px] font-semibold text-white">
+                    {item.kind === "deposit"
+                      ? "Onchain deposit"
+                      : item.kind === "internal_transfer"
+                        ? item.direction === "received"
+                          ? "Internal app transfer in"
+                          : "Internal app transfer out"
+                        : item.direction === "received"
+                          ? "Received transfer"
+                          : "Sent transfer"}{" "}
+                    · {item.amount} {item.symbol}
+                  </p>
+                  <p className="mt-1 truncate text-[12px] text-[#8b95ab]">
+                    {networkLabel} · Block #{item.blockNumber} ·{" "}
+                    {item.counterpartyLabel ?? "Unknown counterparty"} · Tx{" "}
+                    {item.txHash.slice(0, 12)}...
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold ${
+                    item.kind === "internal_transfer"
+                      ? "bg-[#14274d] text-[#8fb3ff]"
+                      : item.direction === "received"
+                        ? "bg-[#13301f] text-[#6df5a0]"
+                        : "bg-[#35171a] text-[#ff9599]"
+                  }`}
+                >
+                  {item.kind === "deposit"
+                    ? "Deposit"
+                    : item.kind === "internal_transfer"
+                      ? "App Transfer"
+                      : item.direction === "received"
+                        ? "Incoming"
+                        : "Outgoing"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-6 py-8">
+            <div className="mx-auto max-w-[820px] text-center">
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#111726] text-[#6788ff]">
+                <PulseIcon />
+              </span>
+              <p className="mt-4 [font-family:var(--font-syne)] text-[24px] leading-none">
+                No verified activity yet
+              </p>
 
-            <div className="mt-4 space-y-2">
-              {feedEmptyStates.map((line) => (
-                <p key={line} className="text-[14px] leading-6 text-[#8b95ab]">
-                  {line}
-                </p>
-              ))}
+              <div className="mt-4 space-y-2">
+                {feedEmptyStates.map((line) => (
+                  <p
+                    key={line}
+                    className="text-[14px] leading-6 text-[#8b95ab]"
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="border-t border-[#2a303a] px-6 py-4 text-center text-[13px] font-medium text-[#b9c1d6]">
-          Load more activity
-        </div>
+        {activity.length > 0 ? (
+          <div className="border-t border-[#2a303a] px-6 py-4 text-center">
+            {hasMore ? (
+              <button
+                type="button"
+                onClick={() => setVisibleCount((current) => current + 5)}
+                className="text-[13px] font-medium text-[#b9c1d6] transition hover:text-white"
+              >
+                Load more activity
+              </button>
+            ) : (
+              <p className="text-[13px] font-medium text-[#7f889b]">
+                All activity loaded
+              </p>
+            )}
+          </div>
+        ) : null}
       </div>
     </section>
   );

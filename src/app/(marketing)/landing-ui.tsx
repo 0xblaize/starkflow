@@ -125,10 +125,10 @@ function HeroArt() {
       </div>
       <div className="absolute -bottom-7 -left-18 flex min-w-62.5 items-center gap-4 rounded-[18px] border border-[#313646] bg-[#1b1f26] px-5 py-4 text-[12px] text-[#9aa1b5] shadow-[0_22px_50px_rgba(0,0,0,0.4)]">
         <StatusCheckIcon />
-        <div>
-          <p className="text-[15px] font-semibold text-white">Sent to @stark_king</p>
-          <p className="mt-1 text-[12px] text-[#a3a9ba]">Gas Fee: $0.00 Sponsored</p>
-        </div>
+          <div>
+            <p className="text-[15px] font-semibold text-white">Sent to verified username</p>
+            <p className="mt-1 text-[12px] text-[#a3a9ba]">Gas Fee: $0.00 Sponsored</p>
+          </div>
       </div>
     </div>
   );

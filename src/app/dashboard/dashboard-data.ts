@@ -15,7 +15,7 @@ export const tokenTickers = [
     symbol: "USDC",
     balance: "0.00",
     network: "Testnet",
-    note: "Stable rail",
+    note: "Stable",
   },
   {
     symbol: "BTC",
@@ -28,36 +28,40 @@ export type TokenTicker = (typeof tokenTickers)[number];
 
 export const onchainAssets = [
   {
-    name: "strkBTC Vault",
+    name: "starkBTC",
     symbol: "strkBTC",
+    iconSrc: "/tokens/strkbtc.svg",
     network: "Testnet",
     balance: "0.0000",
     status: "No deposit settled yet",
-    tone: "primary",
+   
   },
   {
-    name: "STRK Wallet",
+    name: "STARKNET",
     symbol: "STRK",
+    iconSrc: "/tokens/strk.svg",
     network: "Testnet",
     balance: "0.0000",
     status: "Waiting for first transfer",
-    tone: "secondary",
+    
   },
   {
-    name: "USDC Rail",
+    name: "USDC",
     symbol: "USDC",
+    iconSrc: "/tokens/usdc.svg",
     network: "Testnet",
     balance: "0.00",
     status: "Stable route empty",
-    tone: "gold",
+   
   },
   {
-    name: "BTC Bridge",
+    name: "BITCOIN",
     symbol: "BTC",
+    iconSrc: "/tokens/btc.svg",
     network: "Standby",
     balance: "0.0000",
     status: "Bridge flow inactive",
-    tone: "neutral",
+    
   },
 ] as const;
 export type OnchainAsset = (typeof onchainAssets)[number];

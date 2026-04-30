@@ -37,7 +37,12 @@ export async function GET(req: NextRequest) {
         ? 401
         : 500;
     return NextResponse.json(
-      { error: "Failed to fetch profile." },
+      {
+        error: "Failed to fetch profile.",
+        ...(process.env.NODE_ENV !== "production"
+          ? { details: message }
+          : {}),
+      },
       { status },
     );
   }
@@ -119,6 +124,14 @@ export async function POST(req: NextRequest) {
       message.toLowerCase().includes("jwt")
         ? 401
         : 500;
-    return NextResponse.json({ error: "Failed to save profile." }, { status });
+    return NextResponse.json(
+      {
+        error: "Failed to save profile.",
+        ...(process.env.NODE_ENV !== "production"
+          ? { details: message }
+          : {}),
+      },
+      { status },
+    );
   }
 }

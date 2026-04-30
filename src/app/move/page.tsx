@@ -6,7 +6,7 @@ import { MoveCenterView } from "./move-ui";
 import { usePrivyProfile } from "@/lib/use-privy-profile";
 
 function MovePageInner() {
-  const { loadingProfile, logout, profile, ready, user } = usePrivyProfile();
+  const { getAccessToken, loadingProfile, logout, profile, ready, user } = usePrivyProfile();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -39,7 +39,10 @@ function MovePageInner() {
   return (
     <MoveCenterView
       currentTab={currentTab}
+      getAccessToken={getAccessToken}
+      preferredNetwork={profile.preferredNetwork ?? "sepolia"}
       signOutAction={handleSignOut}
+      starknetAddress={profile.starknetAddress ?? null}
       user={{
         name: displayName,
         email: displayEmail,
