@@ -11,11 +11,77 @@ type WalletMetadata = {
 
 type SupportedNetwork = "sepolia" | "mainnet";
 
+export type PrivyStarknetWalletSession = {
+  address: string;
+  explorerUrl: string;
+  network: SupportedNetwork;
+  paymasterUrl: string | null;
+  publicKey: string;
+  rpcUrl: string;
+  signUrl: string;
+  sponsoredExecution: boolean;
+  walletId: string;
+};
+
 type InitStarkFlowOptions = {
   deploy?: "if_needed" | "never" | "always";
 };
 
 const avnuApiKey = process.env.AVNU_PAYMASTER_API_KEY;
+
+type JwtDebugSummary = {
+  aud: string | string[] | null;
+  exp: number | null;
+  iss: string | null;
+  kind: "access" | "identity" | "unknown";
+  sub: string | null;
+};
+
+function decodeJwtSummary(token: string): JwtDebugSummary {
+  try {
+    const [, payloadPart] = token.split(".");
+    if (!payloadPart) {
+      return {
+        aud: null,
+        exp: null,
+        iss: null,
+        kind: "unknown",
+        sub: null,
+      };
+    }
+
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+
+    return {
+      aud:
+        typeof payload.aud === "string" || Array.isArray(payload.aud)
+          ? (payload.aud as string | string[])
+          : null,
+      exp: typeof payload.exp === "number" ? payload.exp : null,
+      iss: typeof payload.iss === "string" ? payload.iss : null,
+      kind:
+        Array.isArray(payload.linked_accounts)
+          ? "identity"
+          : typeof payload.sid === "string"
+            ? "access"
+            : "unknown",
+      sub: typeof payload.sub === "string" ? payload.sub : null,
+    };
+  } catch {
+    return {
+      aud: null,
+      exp: null,
+      iss: null,
+      kind: "unknown",
+      sub: null,
+    };
+  }
+}
 
 // Lazy load starkzap to avoid bundling it at build time
 let cachedStarkzap: any = null;
@@ -63,6 +129,15 @@ const NETWORK_CONFIG = async () => {
     },
   } as const;
 };
+
+async function resolveNetworkConfig(preferredNetwork?: string | null) {
+  const network = normalizePreferredNetwork(
+    preferredNetwork,
+  ) as SupportedNetwork;
+  const config = (await NETWORK_CONFIG())[network];
+
+  return { config, network };
+}
 
 function buildPaymaster(network: SupportedNetwork) {
   if (!avnuApiKey) return {};
@@ -128,25 +203,89 @@ async function ensurePrivyStarknetWallet(privyUserId: string) {
   return wallet;
 }
 
+export async function getPrivyStarknetWalletSession(
+  privyUserId: string,
+  preferredNetwork?: string | null,
+): Promise<PrivyStarknetWalletSession> {
+  const [{ config, network }, walletMetadata] = await Promise.all([
+    resolveNetworkConfig(preferredNetwork),
+    ensurePrivyStarknetWallet(privyUserId),
+  ]);
+
+  return {
+    address: walletMetadata.address,
+    explorerUrl: config.explorerUrl,
+    network,
+    paymasterUrl: avnuApiKey
+      ? `/api/move/paymaster?network=${network}`
+      : null,
+    publicKey: walletMetadata.publicKey,
+    rpcUrl: config.rpcUrl,
+    signUrl: "/api/move/sign",
+    sponsoredExecution: Boolean(avnuApiKey),
+    walletId: walletMetadata.walletId,
+  };
+}
+
 async function connectPrivyStarknetWallet(
   network: SupportedNetwork,
   walletMetadata: WalletMetadata,
+  userJwts: string[],
   deploy: InitStarkFlowOptions["deploy"] = "if_needed",
 ) {
   const { Wallet, PrivySigner, ArgentXV050Preset, ChainId } = await getStarkzap();
   const privy = getPrivyClient();
-  const config = (await NETWORK_CONFIG())[network];
+  const { config } = await resolveNetworkConfig(network);
   const provider = new RpcProvider({ nodeUrl: config.rpcUrl });
 
   const signer = new PrivySigner({
     walletId: walletMetadata.walletId,
     publicKey: walletMetadata.publicKey,
     rawSign: async (walletId: string, hash: string) => {
-      const { signature } = await privy.wallets().rawSign(walletId, {
-        params: { hash },
-      });
+      let lastError: unknown;
+      const attempts: string[] = [];
 
-      return signature;
+      for (const userJwt of userJwts) {
+        const jwtSummary = decodeJwtSummary(userJwt);
+
+        try {
+          const { signature } = await privy.wallets().rawSign(walletId, {
+            authorization_context: {
+              user_jwts: [userJwt],
+            },
+            params: { hash },
+          });
+
+          return signature;
+        } catch (error) {
+          lastError = error;
+          const message =
+            error instanceof Error ? error.message.toLowerCase() : "";
+          attempts.push(
+            `${jwtSummary.kind}(iss=${jwtSummary.iss ?? "?"}, aud=${
+              Array.isArray(jwtSummary.aud)
+                ? jwtSummary.aud.join(",")
+                : (jwtSummary.aud ?? "?")
+            }, sub=${jwtSummary.sub ?? "?"}, exp=${jwtSummary.exp ?? "?"}) => ${
+              error instanceof Error ? error.message : "unknown error"
+            }`,
+          );
+
+          if (
+            !message.includes("invalid jwt") &&
+            !message.includes("invalid_data")
+          ) {
+            throw error;
+          }
+        }
+      }
+
+      const attemptSummary =
+        attempts.length > 0 ? ` Attempts: ${attempts.join(" | ")}` : "";
+
+      throw lastError instanceof Error
+        ? new Error(`${lastError.message}${attemptSummary}`)
+        : new Error(`Privy rawSign failed for all available JWTs.${attemptSummary}`);
     },
   });
 
@@ -181,6 +320,7 @@ async function connectPrivyStarknetWallet(
 
 export async function initStarkFlow(
   userId: string,
+  userJwt: string | string[],
   options: InitStarkFlowOptions = {},
 ) {
   const { mainnetTokens, sepoliaTokens } = await getStarkzap();
@@ -193,9 +333,8 @@ export async function initStarkFlow(
   }
 
   const privyUserId = user.privyUserId ?? user.id;
-  const network = normalizePreferredNetwork(
-    user.preferredNetwork,
-  ) as SupportedNetwork;
+  const walletAuthorizationJwts = Array.isArray(userJwt) ? userJwt : [userJwt];
+  const { network } = await resolveNetworkConfig(user.preferredNetwork);
   const walletMetadata = await ensurePrivyStarknetWallet(privyUserId);
 
   const needsMetadataSync =
@@ -219,6 +358,7 @@ export async function initStarkFlow(
   const { wallet, deployed } = await connectPrivyStarknetWallet(
     network,
     walletMetadata,
+    walletAuthorizationJwts,
     options.deploy ?? "if_needed",
   );
 

@@ -1,16 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyPrivyToken } from "@/lib/privy-server";
+import { normalizePreferredNetwork } from "@/lib/app-user";
+import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { readMoveTokenBalance, searchVerifiedMoveTokens } from "@/lib/move-tokens";
 
 export async function GET(req: NextRequest) {
   try {
-    const claims = await verifyPrivyToken(req);
-    const user = await getOrCreatePrivyUser(claims);
     const { searchParams } = new URL(req.url);
+    const requestedNetwork = searchParams.get("network");
     const query = searchParams.get("q")?.trim() ?? "";
     const limit = Number(searchParams.get("limit") ?? "24");
     const includeBalances = searchParams.get("balances") === "1";
+    const network = requestedNetwork
+      ? normalizePreferredNetwork(requestedNetwork)
+      : null;
+    const user = network
+      ? {
+          preferredNetwork: network,
+          starknetAddress: searchParams.get("address")?.trim() || null,
+        }
+      : await getOrCreatePrivyUser(await verifyPrivyToken(req));
     const tokens = searchVerifiedMoveTokens(
       user.preferredNetwork,
       query,
@@ -67,7 +76,7 @@ export async function GET(req: NextRequest) {
         error:
           error instanceof Error ? error.message : "Failed to load verified tokens.",
       },
-      { status: 500 },
+      { status: getPrivyErrorStatus(error) },
     );
   }
 }

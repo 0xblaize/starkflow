@@ -6,7 +6,8 @@ import { PredictView } from "./predict-ui";
 import { usePrivyProfile } from "@/lib/use-privy-profile";
 
 export default function PredictPage() {
-  const { loadingProfile, logout, profile, ready, user } = usePrivyProfile();
+  const { getAccessToken, loadingProfile, logout, profile, ready, user } =
+    usePrivyProfile();
   const router = useRouter();
 
   const handleSignOut = useCallback(async () => {
@@ -31,6 +32,8 @@ export default function PredictPage() {
 
   return (
     <PredictView
+      getAccessToken={getAccessToken}
+      preferredNetwork={profile.preferredNetwork === "mainnet" ? "mainnet" : "sepolia"}
       signOutAction={handleSignOut}
       user={{
         name: displayName,

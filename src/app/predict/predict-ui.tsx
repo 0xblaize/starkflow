@@ -1,13 +1,13 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { TopbarAppShell } from "@/components/app-shell/shell";
-import {
-  globalFeedItems,
-  marketCards,
-  mobilePredictSummary,
-  predictSteps,
-} from "./predict-data";
+import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
+import { predictSteps } from "./predict-data";
 
 type PredictViewProps = {
+  getAccessToken: () => Promise<string | null>;
+  preferredNetwork: "mainnet" | "sepolia";
   signOutAction: () => Promise<void>;
   user: {
     name?: string | null;
@@ -15,7 +15,237 @@ type PredictViewProps = {
   };
 };
 
-export function PredictView({ signOutAction, user }: PredictViewProps) {
+type PredictFeedItem = {
+  body: string;
+  time: string;
+  title: string;
+};
+
+type PredictMarket = {
+  category: string;
+  currentPriceDisplay: string;
+  currentPriceUsd: number | null;
+  description: string;
+  id: string;
+  noProbability: number;
+  priceSource: string;
+  sourceUpdatedAt: string | null;
+  state: string;
+  targetPriceDisplay: string;
+  targetPriceUsd: number;
+  timeframe: string;
+  title: string;
+  totalBets: number;
+  totalVolumeDisplay: string;
+  yesProbability: number;
+};
+
+type PredictSavedBet = {
+  createdAt: string;
+  currentPrice: string | null;
+  id: string;
+  marketCategory: string;
+  marketId: string;
+  marketTitle: string;
+  outcome: "YES" | "NO";
+  stakeAmount: string;
+  stakeCurrency: string;
+  status: string;
+  targetPrice: string;
+};
+
+type PredictSummary = {
+  activeHedges: number;
+  activeHedgesDisplay: string;
+  priceSources: string[];
+  totalVolumeDisplay: string;
+  totalVolumeUsd: number;
+};
+
+type PredictMarketsPayload = {
+  feed: PredictFeedItem[];
+  markets: PredictMarket[];
+  myBets: PredictSavedBet[];
+  network: "mainnet" | "sepolia";
+  sessionKeySupported: boolean;
+  summary: PredictSummary;
+};
+
+type SubmitState =
+  | { error: string; status: "error" }
+  | { message: string; status: "success" }
+  | null;
+
+const stakeChoices = ["1", "5", "10"] as const;
+
+async function fetchPredictJson<T>(
+  getAccessToken: () => Promise<string | null>,
+  input: string,
+  init?: RequestInit,
+) {
+  const token = await waitForPrivyAccessToken(getAccessToken);
+
+  if (!token) {
+    throw new Error("Privy access token was not ready");
+  }
+
+  const response = await fetch(input, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | T
+    | { error?: string }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      typeof payload === "object" && payload && "error" in payload && payload.error
+        ? payload.error
+        : `Request failed with status ${response.status}`,
+    );
+  }
+
+  return payload as T;
+}
+
+function shortStakeDisplay(stakeAmount: string, currency: string) {
+  return `${stakeAmount} ${currency}`;
+}
+
+function shortTimestamp(isoValue: string) {
+  const createdAt = new Date(isoValue);
+  const diffMs = Date.now() - createdAt.getTime();
+  const diffMinutes = Math.max(1, Math.round(diffMs / 60_000));
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+export function PredictView({
+  getAccessToken,
+  preferredNetwork,
+  signOutAction,
+  user,
+}: PredictViewProps) {
+  const [feed, setFeed] = useState<PredictFeedItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [markets, setMarkets] = useState<PredictMarket[]>([]);
+  const [myBets, setMyBets] = useState<PredictSavedBet[]>([]);
+  const [placingKey, setPlacingKey] = useState<string | null>(null);
+  const [sessionKeySupported, setSessionKeySupported] = useState(false);
+  const [stakeByMarket, setStakeByMarket] = useState<Record<string, string>>({});
+  const [state, setState] = useState<SubmitState>(null);
+  const [summary, setSummary] = useState<PredictSummary>({
+    activeHedges: 0,
+    activeHedgesDisplay: "00",
+    priceSources: [],
+    totalVolumeDisplay: "$0.00",
+    totalVolumeUsd: 0,
+  });
+
+  async function loadPredictState() {
+    setLoading(true);
+
+    try {
+      const payload = await fetchPredictJson<PredictMarketsPayload>(
+        getAccessToken,
+        "/api/predict/markets",
+      );
+
+      setFeed(payload.feed);
+      setMarkets(payload.markets);
+      setMyBets(payload.myBets);
+      setSessionKeySupported(payload.sessionKeySupported);
+      setSummary(payload.summary);
+      setStakeByMarket((current) => {
+        const next = { ...current };
+
+        for (const market of payload.markets) {
+          if (!next[market.id]) {
+            next[market.id] = "5";
+          }
+        }
+
+        return next;
+      });
+    } catch (error) {
+      setState({
+        status: "error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load prediction markets.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadPredictState();
+  }, [getAccessToken, preferredNetwork]);
+
+  async function handlePlaceBet(market: PredictMarket, outcome: "YES" | "NO") {
+    const stakeAmount = stakeByMarket[market.id] ?? "5";
+
+    setPlacingKey(`${market.id}:${outcome}`);
+    setState(null);
+
+    try {
+      const payload = await fetchPredictJson<{
+        message: string;
+      }>(getAccessToken, "/api/predict/bets", {
+        method: "POST",
+        body: JSON.stringify({
+          marketId: market.id,
+          outcome,
+          stakeAmount,
+        }),
+      });
+
+      await loadPredictState();
+      setState({
+        status: "success",
+        message: payload.message,
+      });
+    } catch (error) {
+      setState({
+        status: "error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to save prediction bet.",
+      });
+    } finally {
+      setPlacingKey(null);
+    }
+  }
+
+  const sourceLabel = useMemo(() => {
+    if (summary.priceSources.length === 0) {
+      return "Unavailable";
+    }
+
+    return summary.priceSources.join(" + ");
+  }, [summary.priceSources]);
+
   return (
     <TopbarAppShell
       title="Predict & Hedge"
@@ -23,8 +253,16 @@ export function PredictView({ signOutAction, user }: PredictViewProps) {
       signOutAction={signOutAction}
       user={user}
     >
-      <DesktopHero />
-      <MobileSummary />
+      <DesktopHero
+        activeHedges={summary.activeHedgesDisplay}
+        totalVolume={summary.totalVolumeDisplay}
+      />
+      <MobileSummary
+        activeHedges={summary.activeHedgesDisplay}
+        totalVolume={summary.totalVolumeDisplay}
+      />
+
+      <InlineState state={state} />
 
       <section className="mt-6">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -33,52 +271,76 @@ export function PredictView({ signOutAction, user }: PredictViewProps) {
               Open Markets
             </h2>
             <p className="mt-1 hidden text-[14px] text-[#8e97ad] md:block">
-              Human-readable hedges with session-key execution rails.
+              Save readable YES / NO hedges with live price context and tracked positions.
             </p>
           </div>
 
           <div className="hidden items-center gap-2 md:flex">
-            <FilterPill>Gas</FilterPill>
-            <FilterPill>Crypto</FilterPill>
-            <FilterPill>Ecosystem</FilterPill>
+            <FilterPill>{preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia"}</FilterPill>
+            <FilterPill>{sourceLabel}</FilterPill>
+            <FilterPill>{sessionKeySupported ? "Session rail live" : "Manual save"}</FilterPill>
           </div>
 
           <button
             type="button"
+            onClick={() => {
+              void loadPredictState();
+            }}
             className="text-[12px] font-semibold text-[#4d72ff] md:hidden"
           >
-            Sort by Edge
+            Refresh
           </button>
         </div>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
-            {marketCards.map((market) => (
-              <MarketCard key={market.title} market={market} />
-            ))}
-
-            <button
-              type="button"
-              className="flex h-12 w-full items-center justify-center rounded-[14px] border border-[#313643] bg-transparent text-[14px] font-semibold text-[#d7ddef]"
-            >
-              Load More Markets
-            </button>
+            {loading ? (
+              <LoadingPanel label="Loading live markets..." />
+            ) : markets.length === 0 ? (
+              <EmptyPanel label="No prediction markets are available right now." />
+            ) : (
+              markets.map((market) => (
+                <MarketCard
+                  key={market.id}
+                  market={market}
+                  onPlaceBet={handlePlaceBet}
+                  placingKey={placingKey}
+                  setStakeAmount={(value) =>
+                    setStakeByMarket((current) => ({
+                      ...current,
+                      [market.id]: value,
+                    }))
+                  }
+                  stakeAmount={stakeByMarket[market.id] ?? "5"}
+                />
+              ))
+            )}
           </div>
 
           <div className="space-y-4">
             <HowItWorksCard />
-            <GlobalFeedCard />
-            <TransparencyCard />
+            <MyHedgesCard bets={myBets} />
+            <GlobalFeedCard items={feed} />
+            <TransparencyCard
+              sessionKeySupported={sessionKeySupported}
+              sourceLabel={sourceLabel}
+            />
           </div>
         </div>
       </section>
 
-      <MobileExecutionBar />
+      <MobileExecutionBar sessionKeySupported={sessionKeySupported} />
     </TopbarAppShell>
   );
 }
 
-function DesktopHero() {
+function DesktopHero({
+  activeHedges,
+  totalVolume,
+}: {
+  activeHedges: string;
+  totalVolume: string;
+}) {
   return (
     <section className="hidden rounded-[24px] border border-[#2c3290] bg-[linear-gradient(135deg,#3a3a91_0%,#36378d_55%,#2e316f_100%)] px-8 py-8 md:block">
       <div className="flex items-start justify-between gap-6">
@@ -93,14 +355,12 @@ function DesktopHero() {
           </h1>
 
           <p className="mt-4 max-w-[620px] text-[16px] leading-7 text-[#d7dcff]">
-            Gasless social prediction markets on Starknet. Protect transaction
-            costs or trade macro events with readable outcomes before live rails
-            are connected.
+            Save directional hedges with live price context and keep your StarkFlow prediction history readable while execution rails mature.
           </p>
 
           <div className="mt-8 grid max-w-[460px] gap-7 sm:grid-cols-2">
-            <HeroStat label="Total Volume" value="$0.00" />
-            <HeroStat label="Open Interest" value="$0.00" />
+            <HeroStat label="Market Volume" value={totalVolume} />
+            <HeroStat label="My Open Hedges" value={activeHedges} />
           </div>
         </div>
 
@@ -112,25 +372,39 @@ function DesktopHero() {
   );
 }
 
-function MobileSummary() {
+function MobileSummary({
+  activeHedges,
+  totalVolume,
+}: {
+  activeHedges: string;
+  totalVolume: string;
+}) {
   return (
     <section className="md:hidden">
       <div className="grid grid-cols-2 gap-3">
-        {mobilePredictSummary.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-[16px] border border-[#22262f] bg-[#171b21] px-4 py-4"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8d96ac]">
-              {item.label}
-            </p>
-            <p className="mt-2 [font-family:var(--font-syne)] text-[28px] font-semibold leading-none text-white">
-              {item.value}
-            </p>
-          </div>
-        ))}
+        <SummaryCard label="Market Volume" value={totalVolume} />
+        <SummaryCard label="My Open Hedges" value={activeHedges} />
       </div>
     </section>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[16px] border border-[#22262f] bg-[#171b21] px-4 py-4">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8d96ac]">
+        {label}
+      </p>
+      <p className="mt-2 [font-family:var(--font-syne)] text-[28px] font-semibold leading-none text-white">
+        {value}
+      </p>
+    </div>
   );
 }
 
@@ -155,8 +429,16 @@ function HeroStat({
 
 function MarketCard({
   market,
+  onPlaceBet,
+  placingKey,
+  setStakeAmount,
+  stakeAmount,
 }: {
-  market: (typeof marketCards)[number];
+  market: PredictMarket;
+  onPlaceBet: (market: PredictMarket, outcome: "YES" | "NO") => Promise<void>;
+  placingKey: string | null;
+  setStakeAmount: (value: string) => void;
+  stakeAmount: string;
 }) {
   return (
     <section className="overflow-hidden rounded-[20px] border border-[#282d37] bg-[#1b1f26]">
@@ -180,56 +462,146 @@ function MarketCard({
               {market.description}
             </p>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-end">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8c95aa]">
-                  Market State
-                </p>
-                <p className="mt-2 [font-family:var(--font-syne)] text-[28px] font-semibold leading-none text-white">
-                  {market.state}
-                </p>
-              </div>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <MarketMetric
+                label="Current Price"
+                value={market.currentPriceDisplay}
+              />
+              <MarketMetric
+                label="Target"
+                value={market.targetPriceDisplay}
+              />
+              <MarketMetric
+                label="Tracked Volume"
+                value={market.totalVolumeDisplay}
+              />
+            </div>
 
-              <div className="h-[54px] rounded-[12px] border border-[#222732] bg-[linear-gradient(180deg,#181c23,#14181f)]">
-                <div className="flex h-full items-center justify-center text-[11px] font-medium text-[#7f88a1]">
-                  Oracle curve unlocks with live data
+            <div className="mt-5 rounded-[12px] border border-[#222732] bg-[linear-gradient(180deg,#181c23,#14181f)] px-4 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8c95aa]">
+                    Market State
+                  </p>
+                  <p className="mt-2 [font-family:var(--font-syne)] text-[24px] font-semibold leading-none text-white">
+                    {market.state}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8c95aa]">
+                    Price Source
+                  </p>
+                  <p className="mt-2 text-[13px] font-semibold text-[#bfc9ea]">
+                    {market.priceSource}
+                  </p>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-5 rounded-[12px] border border-[#222732] bg-[#13171d] px-4 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <FieldLabel>Stake Amount (USDC)</FieldLabel>
+                <div className="flex gap-2">
+                  {stakeChoices.map((choice) => (
+                    <button
+                      key={choice}
+                      type="button"
+                      onClick={() => setStakeAmount(choice)}
+                      className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${
+                        stakeAmount === choice
+                          ? "bg-[#3151ff] text-white"
+                          : "bg-[#1d2230] text-[#adb6cc]"
+                      }`}
+                    >
+                      {choice}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <input
+                inputMode="decimal"
+                value={stakeAmount}
+                onChange={(event) => setStakeAmount(event.target.value)}
+                placeholder="5"
+                className="mt-3 h-11 w-full rounded-[12px] border border-[#2a303b] bg-black px-4 text-[14px] text-white outline-none placeholder:text-[#677086]"
+              />
             </div>
           </div>
 
           <div className="grid gap-3">
-            <OutcomeButton tone="yes" />
-            <OutcomeButton tone="no" />
+            <OutcomeButton
+              active={placingKey === `${market.id}:YES`}
+              probability={market.yesProbability}
+              tone="yes"
+              onClick={() => {
+                void onPlaceBet(market, "YES");
+              }}
+            />
+            <OutcomeButton
+              active={placingKey === `${market.id}:NO`}
+              probability={market.noProbability}
+              tone="no"
+              onClick={() => {
+                void onPlaceBet(market, "NO");
+              }}
+            />
           </div>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#282d37] px-4 py-3 text-[11px] text-[#8b94a9] md:px-5">
-        <span>Price via Pragma Oracle</span>
-        <span>One-click execution via Session Keys. No pop-ups.</span>
+        <span>{market.totalBets} recorded bets on this market</span>
+        <span>{market.sourceUpdatedAt ? `Updated ${shortTimestamp(market.sourceUpdatedAt)}` : "Awaiting source refresh"}</span>
       </div>
     </section>
   );
 }
 
-function OutcomeButton({ tone }: { tone: "yes" | "no" }) {
+function MarketMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[12px] border border-[#222732] bg-[#14181f] px-4 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8c95aa]">
+        {label}
+      </p>
+      <p className="mt-2 text-[14px] font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function OutcomeButton({
+  active,
+  onClick,
+  probability,
+  tone,
+}: {
+  active: boolean;
+  onClick: () => void;
+  probability: number;
+  tone: "yes" | "no";
+}) {
   const isYes = tone === "yes";
 
   return (
     <button
       type="button"
+      onClick={onClick}
+      disabled={active}
       className={`flex h-[64px] w-full flex-col items-center justify-center rounded-[14px] text-center ${
-        isYes
-          ? "bg-[#25c980] text-white"
-          : "bg-[#f05454] text-white"
-      }`}
+        isYes ? "bg-[#25c980] text-white" : "bg-[#f05454] text-white"
+      } disabled:opacity-70`}
     >
       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/75">
-        {isYes ? "Bet Yes" : "Bet No"}
+        {active ? "Saving..." : isYes ? "Bet Yes" : "Bet No"}
       </span>
       <span className="[font-family:var(--font-syne)] mt-1 text-[26px] font-semibold leading-none">
-        --
+        {probability}%
       </span>
     </button>
   );
@@ -264,7 +636,63 @@ function HowItWorksCard() {
   );
 }
 
-function GlobalFeedCard() {
+function MyHedgesCard({ bets }: { bets: PredictSavedBet[] }) {
+  return (
+    <section className="rounded-[20px] border border-[#272c35] bg-[#1a1e25] px-5 py-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[#6185ff]">
+            <PredictShieldIcon />
+          </span>
+          <p className="text-[15px] font-semibold text-white">My Hedges</p>
+        </div>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8d96ac]">
+          Saved
+        </span>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {bets.length === 0 ? (
+          <p className="text-[12px] leading-6 text-[#9099ad]">
+            No saved prediction hedges yet. Choose a market and record your first YES or NO position.
+          </p>
+        ) : (
+          bets.slice(0, 6).map((bet) => (
+            <div
+              key={bet.id}
+              className="rounded-[14px] border border-[#2b303b] bg-[#14181f] px-4 py-4"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[13px] font-semibold text-white">
+                    {bet.marketTitle}
+                  </p>
+                  <p className="mt-1 text-[12px] leading-5 text-[#9099ad]">
+                    {bet.outcome} with {shortStakeDisplay(bet.stakeAmount, bet.stakeCurrency)}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                    bet.outcome === "YES"
+                      ? "bg-[#133927] text-[#7fe0af]"
+                      : "bg-[#421d1d] text-[#ff9f9f]"
+                  }`}
+                >
+                  {bet.outcome}
+                </span>
+              </div>
+              <p className="mt-3 text-[11px] text-[#7e889d]">
+                Target {bet.targetPrice} • Recorded {shortTimestamp(bet.createdAt)}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GlobalFeedCard({ items }: { items: PredictFeedItem[] }) {
   return (
     <section className="rounded-[20px] border border-[#272c35] bg-[#1a1e25] px-5 py-5">
       <div className="flex items-center justify-between gap-3">
@@ -280,51 +708,66 @@ function GlobalFeedCard() {
       </div>
 
       <div className="mt-5 space-y-3">
-        {globalFeedItems.map((item) => (
-          <div
-            key={item.title}
-            className="rounded-[14px] border border-[#2b303b] bg-[#14181f] px-4 py-4"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[13px] font-semibold text-white">{item.title}</p>
-                <p className="mt-1 text-[12px] leading-5 text-[#9099ad]">
-                  {item.body}
-                </p>
+        {items.length === 0 ? (
+          <p className="text-[12px] leading-6 text-[#9099ad]">
+            No prediction activity has been recorded yet.
+          </p>
+        ) : (
+          items.map((item) => (
+            <div
+              key={`${item.title}:${item.time}:${item.body}`}
+              className="rounded-[14px] border border-[#2b303b] bg-[#14181f] px-4 py-4"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[13px] font-semibold text-white">{item.title}</p>
+                  <p className="mt-1 text-[12px] leading-5 text-[#9099ad]">
+                    {item.body}
+                  </p>
+                </div>
+                <span className="text-[11px] text-[#7e889d]">{item.time}</span>
               </div>
-              <span className="text-[11px] text-[#7e889d]">{item.time}</span>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </section>
   );
 }
 
-function TransparencyCard() {
+function TransparencyCard({
+  sessionKeySupported,
+  sourceLabel,
+}: {
+  sessionKeySupported: boolean;
+  sourceLabel: string;
+}) {
   return (
     <section className="rounded-[20px] bg-[linear-gradient(180deg,#171b22,#11151b)] px-5 py-5">
       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#62a6ff]">
         Transparency
       </span>
       <h3 className="mt-4 [font-family:var(--font-syne)] text-[26px] font-semibold leading-[1.02] text-white">
-        Secured by Pragma Oracle
+        Price feeds and bet records stay explicit
       </h3>
       <p className="mt-4 text-[14px] leading-7 text-[#97a0b5]">
-        Resolution and price references will be anchored to oracle rails once
-        the prediction engine is wired into live execution.
+        Live prices are sourced from {sourceLabel}. Bet actions are saved to your StarkFlow profile history first. Session-key execution stays disabled until the installed wallet rail exposes a supported session authorization flow.
       </p>
       <button
         type="button"
         className="mt-5 text-[13px] font-semibold text-[#3b5bff]"
       >
-        View Verification Contract
+        {sessionKeySupported ? "Session rail active" : "Session rail unavailable"}
       </button>
     </section>
   );
 }
 
-function MobileExecutionBar() {
+function MobileExecutionBar({
+  sessionKeySupported,
+}: {
+  sessionKeySupported: boolean;
+}) {
   return (
     <section className="mt-5 rounded-[18px] border border-[#1b2457] bg-[#101840] px-4 py-4 md:hidden">
       <div className="flex items-center gap-3">
@@ -333,15 +776,50 @@ function MobileExecutionBar() {
         </span>
         <div>
           <p className="text-[14px] font-semibold text-[#9fb2ff]">
-            One-click Execution Enabled
+            {sessionKeySupported ? "Execution rail enabled" : "Prediction saving live"}
           </p>
           <p className="mt-1 text-[12px] leading-5 text-[#8697cf]">
-            Session-key rail is ready. Markets stay empty until the oracle and
-            execution backend are connected.
+            {sessionKeySupported
+              ? "This wallet rail can auto-execute prediction actions."
+              : "Bets now save with live prices, but session-key auto-execution is not exposed by the current Starknet wallet stack."}
           </p>
         </div>
       </div>
     </section>
+  );
+}
+
+function LoadingPanel({ label }: { label: string }) {
+  return (
+    <section className="rounded-[20px] border border-[#282d37] bg-[#1b1f26] px-5 py-10 text-center text-[14px] text-[#96a0b6]">
+      {label}
+    </section>
+  );
+}
+
+function EmptyPanel({ label }: { label: string }) {
+  return (
+    <section className="rounded-[20px] border border-[#282d37] bg-[#1b1f26] px-5 py-10 text-center text-[14px] text-[#96a0b6]">
+      {label}
+    </section>
+  );
+}
+
+function InlineState({ state }: { state: SubmitState }) {
+  if (!state) {
+    return null;
+  }
+
+  return (
+    <div
+      className={`mt-5 rounded-[14px] border px-4 py-3 text-[13px] ${
+        state.status === "success"
+          ? "border-[#204b34] bg-[#0f1f17] text-[#9de0ba]"
+          : "border-[#5e2626] bg-[#241313] text-[#ffb4b4]"
+      }`}
+    >
+      {state.status === "success" ? state.message : state.error}
+    </div>
   );
 }
 
@@ -350,6 +828,14 @@ function FilterPill({ children }: { children: ReactNode }) {
     <span className="rounded-full bg-[#151920] px-3 py-1.5 text-[11px] font-semibold text-[#c6cede]">
       {children}
     </span>
+  );
+}
+
+function FieldLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+      {children}
+    </p>
   );
 }
 

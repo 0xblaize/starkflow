@@ -27,9 +27,47 @@ export async function resolveMoveRecipient(query: string) {
     throw new Error("Enter a username or wallet address");
   }
 
-  const handle = sanitized.replace(/^@/, "").replace(/\.stark$/i, "");
+  const normalizedAddress = looksLikeAddress(sanitized)
+    ? normalizeStarknetAddress(sanitized)
+    : null;
 
-  let user = await prisma.user.findFirst({
+  if (normalizedAddress) {
+    const user = await prisma.user.findFirst({
+      where: {
+        starknetAddress: {
+          equals: normalizedAddress,
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+        image: true,
+        starknetAddress: true,
+        username: true,
+      },
+    });
+
+    if (user?.starknetAddress) {
+      return {
+        address: normalizeStarknetAddress(user.starknetAddress),
+        image: user.image,
+        isInternal: true,
+        userId: user.id,
+        username: user.username,
+      };
+    }
+
+    return {
+      address: normalizedAddress,
+      image: null,
+      isInternal: false,
+      userId: null,
+      username: null,
+    };
+  }
+
+  const handle = sanitized.replace(/^@/, "").replace(/\.stark$/i, "");
+  const user = await prisma.user.findFirst({
     where: {
       username: {
         equals: handle,
@@ -44,27 +82,6 @@ export async function resolveMoveRecipient(query: string) {
     },
   });
 
-  const normalizedAddress = looksLikeAddress(sanitized)
-    ? normalizeStarknetAddress(sanitized)
-    : null;
-
-  if (!user && normalizedAddress) {
-    user = await prisma.user.findFirst({
-      where: {
-        starknetAddress: {
-          equals: normalizedAddress,
-          mode: "insensitive",
-        },
-      },
-      select: {
-        id: true,
-        image: true,
-        starknetAddress: true,
-        username: true,
-      },
-    });
-  }
-
   if (user?.starknetAddress) {
     return {
       address: normalizeStarknetAddress(user.starknetAddress),
@@ -72,16 +89,6 @@ export async function resolveMoveRecipient(query: string) {
       isInternal: true,
       userId: user.id,
       username: user.username,
-    };
-  }
-
-  if (normalizedAddress) {
-    return {
-      address: normalizedAddress,
-      image: null,
-      isInternal: false,
-      userId: null,
-      username: null,
     };
   }
 

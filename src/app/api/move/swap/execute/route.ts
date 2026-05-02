@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrivyBearerToken, verifyPrivyToken } from "@/lib/privy-server";
+import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
 import { initStarkFlow } from "@/lib/starkflow-init";
@@ -9,7 +9,7 @@ import type { Token } from "../../../../../../node_modules/starkzap/dist/src/typ
 export async function POST(req: NextRequest) {
   try {
     const claims = await verifyPrivyToken(req);
-    const userJwt = getPrivyBearerToken(req);
+    const userJwts = getPrivyWalletJwts(req);
     const user = await getOrCreatePrivyUser(claims);
     const body = (await req.json()) as {
       amount?: string;
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const flow = await initStarkFlow(user.id, { deploy: "if_needed" });
+    const flow = await initStarkFlow(user.id, userJwts, { deploy: "if_needed" });
     const starkzapTokenIn: Token = {
       address: tokenIn.address,
       decimals: tokenIn.decimals,
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
         error:
           error instanceof Error ? error.message : "Failed to execute swap.",
       },
-      { status: 500 },
+      { status: getPrivyErrorStatus(error) },
     );
   }
 }

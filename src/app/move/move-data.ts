@@ -9,18 +9,18 @@ export type MoveTab = (typeof moveTabs)[number];
 export const programs = [
   {
     title: "DCA Strategy",
-    badge: "Coming Soon",
+    badge: "Live",
     description:
-      "Set up recurring buys like 10 USDC into STRK every Monday once the automation rail is connected.",
-    footer: "Scheduled execution via StarkZap routes",
+      "Create recurring Starknet buys through StarkZap and keep the live strategy ID synced to your profile data.",
+    footer: "AVNU DCA execution on the active Starknet network",
     icon: "dca",
   },
   {
     title: "Yield Loop",
-    badge: "Coming Soon",
+    badge: "Live",
     description:
-      "One-click route into the Vesu lending loop when wallet assets are live and ready to deploy.",
-    footer: "Yield is shown only after real positions exist",
+      "Deposit supported assets into Vesu from StarkFlow and refresh live positions without leaving the app.",
+    footer: "Vesu lending execution on the active Starknet network",
     icon: "yield",
   },
 ] as const;
@@ -36,7 +36,7 @@ export const helpItems = [
     body: "Search by Starknet username or paste a wallet address. No recipient appears until a live lookup succeeds.",
   },
   {
-    title: "Bridge BTC support",
-    body: "The WalletConnect BTC bridge rail stays idle until the BTC bridge connector is enabled.",
+    title: "Bridge connector support",
+    body: "Bridge routes in this build follow StarkZap's installed external connectors. Ethereum and Solana are available in-package.",
   },
 ] as const;

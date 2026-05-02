@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrivyBearerToken, verifyPrivyToken } from "@/lib/privy-server";
+import { getPrivyBearerToken, getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
 import { initStarkFlow } from "@/lib/starkflow-init";
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const flow = await initStarkFlow(user.id, { deploy: "never" });
+    const flow = await initStarkFlow(user.id, userJwt, { deploy: "never" });
     const starkzapTokenIn: Token = {
       address: tokenIn.address,
       decimals: tokenIn.decimals,
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
         error:
           error instanceof Error ? error.message : "Failed to fetch swap quote.",
       },
-      { status: 500 },
+      { status: getPrivyErrorStatus(error) },
     );
   }
 }

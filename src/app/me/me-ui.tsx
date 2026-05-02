@@ -36,7 +36,7 @@ export function MeView({
   const profileName = handle;
   const shortAddress = user.starknetAddress
     ? `${user.starknetAddress.slice(0, 8)}...${user.starknetAddress.slice(-6)}`
-    : "pending...";
+    : "No wallet linked";
   const activeNetwork =
     user.preferredNetwork === "sepolia" ? "Sepolia Side" : "Mainnet Side";
 
@@ -882,3 +882,4 @@ function SessionKeyIcon() {
     </svg>
   );
 }
+

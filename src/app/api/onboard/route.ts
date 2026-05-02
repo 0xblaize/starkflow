@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyPrivyToken } from "@/lib/privy-server";
+import { getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { initStarkFlow } from "@/lib/starkflow-init";
 import { getWalletDeploymentState } from "@/lib/starknet-read";
@@ -7,7 +7,7 @@ import { getWalletDeploymentState } from "@/lib/starknet-read";
 export async function POST(req: NextRequest) {
   try {
     const claims = await verifyPrivyToken(req);
-    const userJwt = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const userJwts = getPrivyWalletJwts(req);
 
     const appUser = await getOrCreatePrivyUser(claims);
 
@@ -24,11 +24,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!userJwt) {
-      return NextResponse.json({ error: "Missing Privy bearer token" }, { status: 401 });
-    }
-
-    const flow = await initStarkFlow(appUser.id);
+    const flow = await initStarkFlow(appUser.id, userJwts);
 
     return NextResponse.json({
       address: flow.address,

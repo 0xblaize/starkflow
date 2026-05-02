@@ -2,19 +2,21 @@
 
 import { Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useIdentityToken } from "@privy-io/react-auth";
 import { MoveCenterView } from "./move-ui";
 import { usePrivyProfile } from "@/lib/use-privy-profile";
 
 function MovePageInner() {
   const { getAccessToken, loadingProfile, logout, profile, ready, user } = usePrivyProfile();
+  const { identityToken } = useIdentityToken();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const loadAccessToken = useCallback(() => getAccessToken(), [getAccessToken]);
 
   const currentTab =
     searchParams.get("tab") === "swap" || searchParams.get("tab") === "bridge"
       ? (searchParams.get("tab") as "swap" | "bridge")
       : "send";
-  const walletConnected = searchParams.get("wallet") === "connected";
 
   const handleSignOut = useCallback(async () => {
     await logout();
@@ -39,7 +41,8 @@ function MovePageInner() {
   return (
     <MoveCenterView
       currentTab={currentTab}
-      getAccessToken={getAccessToken}
+      getAccessToken={loadAccessToken}
+      identityToken={identityToken}
       preferredNetwork={profile.preferredNetwork ?? "sepolia"}
       signOutAction={handleSignOut}
       starknetAddress={profile.starknetAddress ?? null}
@@ -47,7 +50,6 @@ function MovePageInner() {
         name: displayName,
         email: displayEmail,
       }}
-      walletConnected={walletConnected}
     />
   );
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrivyBearerToken, verifyPrivyToken } from "@/lib/privy-server";
+import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { resolveMoveRecipient } from "@/lib/move-recipient";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
@@ -11,7 +11,7 @@ import type { Token } from "../../../../../node_modules/starkzap/dist/src/types/
 export async function POST(req: NextRequest) {
   try {
     const claims = await verifyPrivyToken(req);
-    const userJwt = getPrivyBearerToken(req);
+    const userJwts = getPrivyWalletJwts(req);
     const user = await getOrCreatePrivyUser(claims);
     const body = (await req.json()) as {
       amount?: string;
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     const recipient = await resolveMoveRecipient(body.recipientQuery);
-    const flow = await initStarkFlow(user.id, { deploy: "if_needed" });
+    const flow = await initStarkFlow(user.id, userJwts, { deploy: "if_needed" });
     const starkzapToken: Token = {
       address: token.address,
       decimals: token.decimals,
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
         error:
           error instanceof Error ? error.message : "Failed to execute send.",
       },
-      { status: 500 },
+      { status: getPrivyErrorStatus(error) },
     );
   }
 }

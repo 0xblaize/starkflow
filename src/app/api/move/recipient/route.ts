@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveMoveRecipient, shortAddress } from "@/lib/move-recipient";
-import { verifyPrivyToken } from "@/lib/privy-server";
+import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
         error:
           error instanceof Error ? error.message : "Failed to resolve recipient.",
       },
-      { status: 400 },
+      { status: getPrivyErrorStatus(error) === 401 ? 401 : 400 },
     );
   }
 }

@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyPrivyToken } from "@/lib/privy-server";
+import { normalizePreferredNetwork } from "@/lib/app-user";
+import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress, readMoveTokenBalance } from "@/lib/move-tokens";
 
 export async function GET(req: NextRequest) {
   try {
-    const claims = await verifyPrivyToken(req);
-    const user = await getOrCreatePrivyUser(claims);
     const { searchParams } = new URL(req.url);
     const tokenAddress = searchParams.get("token")?.trim();
+    const requestedAddress = searchParams.get("address")?.trim();
+    const requestedNetwork = searchParams.get("network");
 
     if (!tokenAddress) {
       return NextResponse.json(
@@ -17,6 +18,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const user =
+      requestedNetwork && requestedAddress
+        ? {
+            preferredNetwork: normalizePreferredNetwork(requestedNetwork),
+            starknetAddress: requestedAddress,
+          }
+        : await getOrCreatePrivyUser(await verifyPrivyToken(req));
     const token = findMoveTokenByAddress(user.preferredNetwork, tokenAddress);
 
     if (!token) {
@@ -51,7 +59,7 @@ export async function GET(req: NextRequest) {
         error:
           error instanceof Error ? error.message : "Failed to load token balance.",
       },
-      { status: 500 },
+      { status: getPrivyErrorStatus(error) },
     );
   }
 }
