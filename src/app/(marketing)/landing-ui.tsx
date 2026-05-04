@@ -187,8 +187,8 @@ export function HeroSection() {
               Get Started - Gasless
               <ArrowIcon />
             </Link>
-            <a href="#demo" className="inline-flex h-11 items-center justify-center rounded-[10px] border border-[#3a4051] px-5 text-[11px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
-              Explore Demo
+            <a href="#sign-in" className="inline-flex h-11 items-center justify-center rounded-[10px] border border-[#3a4051] px-5 text-[11px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
+              Explore 
             </a>
           </div>
 

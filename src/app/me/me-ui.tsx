@@ -599,7 +599,7 @@ function MobilePersonalHub({
         activeNetwork={activeNetwork}
       />
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {personalStats.map((item) => (
           <section
             key={item.label}
@@ -978,8 +978,8 @@ function PredictionPositionsCard({
               key={position.id}
               className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-semibold text-white">
                     {position.marketTitle}
                   </p>
@@ -1000,7 +1000,7 @@ function PredictionPositionsCard({
                 </span>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <MiniMetric label="Unrealized P/L" value={position.unrealizedPnl} />
                 <MiniMetric label="Marked Value" value={position.currentMarkValue} />
                 <MiniMetric
@@ -1014,8 +1014,8 @@ function PredictionPositionsCard({
                 Target {position.targetPriceDisplay} · Entry {position.entryProbability}% · Logged{" "}
                 {shortRelativeTime(position.createdAt)}
               </p>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8e97aa]">
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="break-words text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8e97aa]">
                   {position.status} · {position.executionMode}
                 </span>
                 {position.status === "OPEN" && position.executionMode !== "ONCHAIN" ? (
@@ -1084,8 +1084,8 @@ function DcaStrategiesCard({
               key={strategy.id}
               className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-semibold text-white">
                     {strategy.sellTokenSymbol} → {strategy.buyTokenSymbol}
                   </p>
@@ -1098,7 +1098,7 @@ function DcaStrategiesCard({
                 </span>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <MiniMetric label="Budget" value={strategy.sellAmount} />
                 <MiniMetric label="Frequency" value={frequencyLabel(strategy.frequency)} />
               </div>
@@ -1106,8 +1106,8 @@ function DcaStrategiesCard({
               <p className="mt-3 text-[11px] text-[#7d8699]">
                 Provider {strategy.providerId} · Logged {shortRelativeTime(strategy.createdAt)}
               </p>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] text-[#7d8699]">
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="break-all text-[11px] text-[#7d8699]">
                   {strategy.orderAddress ? shortHash(strategy.orderAddress) : "No order address"}
                 </span>
                 {strategy.status !== "CLOSED" && strategy.orderAddress ? (
@@ -1183,8 +1183,8 @@ function YieldPositionsCard({
               key={`${position.poolId}:${position.collateralTokenAddress}:${index}`}
               className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-semibold text-white">{position.pool}</p>
                   <p className="mt-1 text-[12px] text-[#8e97aa]">
                     {position.type}
@@ -1195,7 +1195,7 @@ function YieldPositionsCard({
                 </span>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <MiniMetric
                   label="Collateral"
                   value={`${position.collateralAmount}`}
@@ -1217,8 +1217,8 @@ function YieldPositionsCard({
                   value={position.debtUsdValue ?? "None"}
                 />
               </div>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] text-[#7d8699]">
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="break-words text-[11px] text-[#7d8699]">
                   {position.type === "earn" ? "Withdraw available" : "Repay required"}
                 </span>
                 {position.canWithdraw ? (
@@ -1268,11 +1268,11 @@ function MiniMetric({
   value: string;
 }) {
   return (
-    <div className="rounded-[12px] border border-[#232834] bg-[#151920] px-3 py-3">
+    <div className="min-w-0 rounded-[12px] border border-[#232834] bg-[#151920] px-3 py-3">
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
         {label}
       </p>
-      <p className="mt-2 text-[13px] font-semibold text-white">{value}</p>
+      <p className="mt-2 break-words text-[13px] font-semibold text-white">{value}</p>
     </div>
   );
 }

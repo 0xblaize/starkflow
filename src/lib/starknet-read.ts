@@ -2,6 +2,7 @@ import { hash, RpcProvider } from "starknet";
 import { mainnetTokens } from "../../node_modules/starkzap/dist/src/erc20/token/presets.js";
 import { sepoliaTokens } from "../../node_modules/starkzap/dist/src/erc20/token/presets.sepolia.js";
 import { normalizePreferredNetwork, type PreferredNetwork } from "@/lib/app-user";
+import { getStarknetRpcUrl } from "@/lib/starknet-rpc";
 
 type Network = "mainnet" | "sepolia";
 
@@ -23,31 +24,24 @@ type ActivityItem = {
   txHash: string;
 };
 
-const NETWORK_CONFIG: Record<Network, { rpcUrl: string }> = {
-  sepolia: {
-    rpcUrl:
-      process.env.STARKNET_RPC_URL ??
-      "https://free-rpc.nethermind.io/sepolia-juno/v0_7",
-  },
-  mainnet: {
-    rpcUrl:
-      process.env.STARKNET_MAINNET_RPC_URL ??
-      "https://free-rpc.nethermind.io/mainnet-juno/v0_7",
-  },
-};
-
-const providerCache: Partial<Record<Network, RpcProvider>> = {};
+const providerCache = new Map<string, RpcProvider>();
 let strkPriceCache: { fetchedAt: number; priceUsd: number | null } | null = null;
 let btcPriceCache: { fetchedAt: number; priceUsd: number | null } | null = null;
 
 function getProvider(network: Network) {
-  if (!providerCache[network]) {
-    providerCache[network] = new RpcProvider({
-      nodeUrl: NETWORK_CONFIG[network].rpcUrl,
-    });
+  const rpcUrl = getStarknetRpcUrl(network);
+  const cacheKey = `${network}:${rpcUrl}`;
+  const cached = providerCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
   }
 
-  return providerCache[network]!;
+  const provider = new RpcProvider({
+    nodeUrl: rpcUrl,
+  });
+  providerCache.set(cacheKey, provider);
+  return provider;
 }
 
 function getTokens(network: Network): { STRK: TokenPreset; USDC: TokenPreset } {

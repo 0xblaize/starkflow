@@ -2,6 +2,7 @@ import { RpcProvider } from "starknet";
 import { normalizePreferredNetwork } from "@/lib/app-user";
 import { getPrivyClient } from "@/lib/privy-client";
 import { prisma } from "@/lib/prisma";
+import { getStarknetRpcUrl } from "@/lib/starknet-rpc";
 
 type WalletMetadata = {
   address: string;
@@ -114,16 +115,12 @@ const NETWORK_CONFIG = async () => {
 
   return {
     sepolia: {
-      rpcUrl:
-        process.env.STARKNET_RPC_URL ??
-        "https://free-rpc.nethermind.io/sepolia-juno/v0_7",
+      rpcUrl: getStarknetRpcUrl("sepolia"),
       chainId: ChainId.SEPOLIA,
       explorerUrl: "https://sepolia.voyager.online",
     },
     mainnet: {
-      rpcUrl:
-        process.env.STARKNET_MAINNET_RPC_URL ??
-        "https://free-rpc.nethermind.io/mainnet-juno/v0_7",
+      rpcUrl: getStarknetRpcUrl("mainnet"),
       chainId: ChainId.MAINNET,
       explorerUrl: "https://voyager.online",
     },

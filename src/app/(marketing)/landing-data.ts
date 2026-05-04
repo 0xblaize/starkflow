@@ -1,4 +1,4 @@
-export const NAV_LINKS = ["Product", "How it works", "Demo", "Docs"];
+export const NAV_LINKS = ["Product", "How it works", "Docs"];
 
 export const STATS = [
   { value: "$1.2B+", label: "TOTAL VOLUME" },

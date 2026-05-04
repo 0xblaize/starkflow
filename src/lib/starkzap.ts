@@ -1,14 +1,7 @@
 import { StarkZap } from "starkzap";
+import { getStarknetRpcUrl } from "@/lib/starknet-rpc";
 
 type Network = "sepolia" | "mainnet";
-
-const sepoliaRpc =
-  process.env.STARKNET_RPC_URL ||
-  "https://starknet-sepolia.public.blastapi.io";
-
-const mainnetRpc =
-  process.env.STARKNET_MAINNET_RPC_URL ||
-  "https://starknet-mainnet.public.blastapi.io";
 
 const avnuApiKey = process.env.AVNU_PAYMASTER_API_KEY;
 
@@ -29,21 +22,29 @@ function buildPaymaster(network: Network) {
 }
 
 /** Cache one SDK instance per network to avoid re-init overhead. */
-const sdkCache: Partial<Record<Network, StarkZap>> = {};
+const sdkCache = new Map<string, StarkZap>();
 
 /**
  * Returns a StarkZap SDK instance for the given network.
  * Cached after first creation.
  */
 export function getSdk(network: Network = "sepolia"): StarkZap {
-  if (!sdkCache[network]) {
-    sdkCache[network] = new StarkZap({
-      network,
-      rpcUrl: network === "mainnet" ? mainnetRpc : sepoliaRpc,
-      ...buildPaymaster(network),
-    });
+  const rpcUrl = getStarknetRpcUrl(network);
+  const cacheKey = `${network}:${rpcUrl}`;
+  const cached = sdkCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
   }
-  return sdkCache[network]!;
+
+  const sdk = new StarkZap({
+    network,
+    rpcUrl,
+    ...buildPaymaster(network),
+  });
+
+  sdkCache.set(cacheKey, sdk);
+  return sdk;
 }
 
 export const paymasterEnabled = Boolean(avnuApiKey);

@@ -5,6 +5,7 @@ import { sepoliaTokens } from "../../node_modules/starkzap/dist/src/erc20/token/
 import type { Token } from "../../node_modules/starkzap/dist/src/types/token.js";
 import { normalizePreferredNetwork, type PreferredNetwork } from "@/lib/app-user";
 import { normalizeStarknetAddress } from "@/lib/move-recipient";
+import { getStarknetRpcUrl } from "@/lib/starknet-rpc";
 
 type TokenPreset = {
   address: string;
@@ -21,20 +22,7 @@ export type MoveToken = Token & {
   logoUrl: string | null;
 };
 
-const providerCache: Partial<Record<PreferredNetwork, RpcProvider>> = {};
-
-const NETWORK_CONFIG: Record<PreferredNetwork, { rpcUrl: string }> = {
-  sepolia: {
-    rpcUrl:
-      process.env.STARKNET_RPC_URL ??
-      "https://starknet-sepolia-rpc.publicnode.com/",
-  },
-  mainnet: {
-    rpcUrl:
-      process.env.STARKNET_MAINNET_RPC_URL ??
-      "https://starknet-mainnet-rpc.publicnode.com/",
-  },
-};
+const providerCache = new Map<string, RpcProvider>();
 
 const FEATURED_SYMBOLS = [
   "STRK",
@@ -48,13 +36,19 @@ const FEATURED_SYMBOLS = [
 ] as const;
 
 function getProvider(network: PreferredNetwork) {
-  if (!providerCache[network]) {
-    providerCache[network] = new RpcProvider({
-      nodeUrl: NETWORK_CONFIG[network].rpcUrl,
-    });
+  const rpcUrl = getStarknetRpcUrl(network);
+  const cacheKey = `${network}:${rpcUrl}`;
+  const cached = providerCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
   }
 
-  return providerCache[network]!;
+  const provider = new RpcProvider({
+    nodeUrl: rpcUrl,
+  });
+  providerCache.set(cacheKey, provider);
+  return provider;
 }
 
 function getPresetMap(network: PreferredNetwork) {

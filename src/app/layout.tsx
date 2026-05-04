@@ -13,8 +13,8 @@ const dmSans = DM_Sans({
 });
 
 export const metadata = {
-  title: "StarkFlow: Crypto Payments for the Rest of Us",
-  description: "The ultimate money toolkit for Starknet.",
+  title: "StarkFlow: Gasless Payments for the Rest of Us",
+  description: "High Performance | Self Custodial | Cross Chain Executiont.",
 };
 
 export default function RootLayout({

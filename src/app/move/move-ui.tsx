@@ -493,7 +493,7 @@ export function MoveCenterView({
           />
         </div>
 
-        <div className="space-y-4">
+        <div className="hidden space-y-4 xl:block">
           <SideRailCard currentTab={currentTab} />
           <RecentActivityCard currentTab={currentTab} />
           <HelpCard currentTab={currentTab} />
@@ -519,6 +519,11 @@ export function MoveCenterView({
               starknetAddress={starknetAddress}
             />
           ))}
+        </div>
+
+        <div className="mt-6 space-y-4 xl:hidden">
+          <RecentActivityCard currentTab={currentTab} />
+          <HelpCard currentTab={currentTab} />
         </div>
       </div>
     </TopbarAppShell>
@@ -1534,17 +1539,17 @@ function SwapInputCard({
 }) {
   return (
     <div className="rounded-[14px] border border-[#2a303b] bg-black px-4 py-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <FieldLabel>{label}</FieldLabel>
         <span className="text-[12px] text-[#9ca5b8]">{balance}</span>
       </div>
-      <div className="mt-5 flex items-center justify-between gap-3">
+      <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <input
           inputMode="decimal"
           value={value}
           onChange={(event) => onAmountChange(event.target.value)}
           placeholder="0.0"
-          className="[font-family:var(--font-syne)] min-w-0 flex-1 bg-transparent text-[32px] leading-none tracking-[-0.04em] text-white outline-none placeholder:text-[#5f6678]"
+          className="[font-family:var(--font-syne)] min-w-0 w-full flex-1 bg-transparent text-[32px] leading-none tracking-[-0.04em] text-white outline-none placeholder:text-[#5f6678]"
         />
         <TokenSelectButton token={token} onClick={onTokenClick} />
       </div>
@@ -1567,12 +1572,12 @@ function SwapOutputCard({
 }) {
   return (
     <div className="rounded-[14px] border border-[#2a303b] bg-black px-4 py-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
         <FieldLabel>{label}</FieldLabel>
-        <span className="text-[12px] text-[#9ca5b8]">{hint}</span>
+        <span className="max-w-full text-[12px] text-[#9ca5b8] sm:text-right">{hint}</span>
       </div>
-      <div className="mt-5 flex items-center justify-between gap-3">
-        <p className="[font-family:var(--font-syne)] min-w-0 flex-1 truncate text-[32px] leading-none tracking-[-0.04em] text-white">
+      <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="[font-family:var(--font-syne)] min-w-0 w-full flex-1 text-[32px] leading-none tracking-[-0.04em] text-white sm:truncate">
           {value}
         </p>
         <TokenSelectButton token={token} onClick={onTokenClick} />
@@ -1751,7 +1756,7 @@ function TokenSelectButton({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-full bg-[#262b35] px-3 py-2 text-[12px] font-semibold text-white"
+      className="inline-flex max-w-full shrink-0 self-start items-center gap-2 rounded-full bg-[#262b35] px-3 py-2 text-[12px] font-semibold text-white sm:self-auto"
     >
       <TokenBadge symbol={token?.symbol ?? "?"} small />
       {token?.symbol ?? "Choose"}
@@ -2251,7 +2256,7 @@ function BridgeFlowCard({
 }) {
   return (
     <div className="rounded-[16px] border border-[#38405e] bg-[#161b2b] p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9eabca]">
             {title}
@@ -2273,7 +2278,7 @@ function BridgeFlowCard({
         )}
       </div>
 
-      <p className="mt-3 text-[12px] text-[#8f98ad]">{walletLabel}</p>
+      <p className="mt-3 break-all text-[12px] text-[#8f98ad]">{walletLabel}</p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {tokenOptions.map((token) => (
@@ -2294,8 +2299,8 @@ function BridgeFlowCard({
       </div>
 
       <div className="mt-4 rounded-[14px] border border-[#2b334d] bg-[#0f1422] px-4 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
               Amount
             </p>
@@ -2308,12 +2313,12 @@ function BridgeFlowCard({
                 className="mt-3 w-full bg-transparent text-[28px] font-semibold text-white outline-none placeholder:text-[#677086]"
               />
             ) : (
-              <p className="mt-3 text-[28px] font-semibold text-white">
+              <p className="mt-3 break-words text-[28px] font-semibold text-white">
                 {amount.trim() || "0.0"}
               </p>
             )}
           </div>
-          <div className="rounded-[12px] border border-[#394465] bg-[#171e30] px-3 py-3 text-right">
+          <div className="w-full rounded-[12px] border border-[#394465] bg-[#171e30] px-3 py-3 text-left sm:w-auto sm:text-right">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
               Asset
             </p>
@@ -2409,7 +2414,7 @@ function BridgeQuickStat({
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
         {label}
       </p>
-      <p className="mt-2 text-[14px] font-semibold text-white">{value}</p>
+      <p className="mt-2 break-words text-[14px] font-semibold text-white">{value}</p>
     </div>
   );
 }
