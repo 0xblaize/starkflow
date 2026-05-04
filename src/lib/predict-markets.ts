@@ -7,6 +7,7 @@ export type PredictMarketDefinition = {
   category: string;
   description: string;
   id: string;
+  onchainMarketId: string;
   operator: PredictOperator;
   referencePriceUsd: number;
   targetOffsetUsd: number;
@@ -23,6 +24,7 @@ export type PredictPriceSnapshot = {
 export const predictMarketDefinitions: PredictMarketDefinition[] = [
   {
     id: "eth-above-3200-friday",
+    onchainMarketId: "ETH24HUP",
     baseAsset: "ETH",
     category: "Crypto Hedge",
     description:
@@ -34,6 +36,7 @@ export const predictMarketDefinitions: PredictMarketDefinition[] = [
   },
   {
     id: "strk-below-0_85-eod",
+    onchainMarketId: "STRK24HDN",
     baseAsset: "STRK",
     category: "Starknet Ecosystem",
     description:
@@ -45,6 +48,7 @@ export const predictMarketDefinitions: PredictMarketDefinition[] = [
   },
   {
     id: "btc-above-100k-week",
+    onchainMarketId: "BTC24HUP",
     baseAsset: "BTC",
     category: "Macro Hedge",
     description:
@@ -92,9 +96,9 @@ function formatOffsetDisplay(value: number) {
 
 function computeTargetPriceUsd(
   market: PredictMarketDefinition,
-  currentPriceUsd: number | null,
+  _currentPriceUsd: number | null,
 ) {
-  const basePrice = currentPriceUsd ?? market.referencePriceUsd;
+  const basePrice = market.referencePriceUsd;
 
   return market.operator === "above"
     ? basePrice + market.targetOffsetUsd

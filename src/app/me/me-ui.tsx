@@ -1,18 +1,18 @@
 import Image from "next/image";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TopbarAppShell } from "@/components/app-shell/shell";
+import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
 import {
   accountLinks,
   legalLinks,
-  personalStats,
   preferenceLinks,
-  quickStats,
   resources,
   supportLinks,
 } from "./me-data";
 
 type MeViewProps = {
+  getAccessToken: () => Promise<string | null>;
   signOutAction: () => Promise<void>;
   updatePreferredNetworkAction: (formData: FormData) => Promise<void>;
   user: {
@@ -26,11 +26,196 @@ type MeViewProps = {
   };
 };
 
+type MePredictionPosition = {
+  createdAt: string;
+  currentMarkValue: string;
+  currentPriceDisplay: string;
+  currentProbability: number;
+  direction: "flat" | "gaining" | "losing";
+  entryProbability: number;
+  executionMode: string;
+  id: string;
+  marketCategory: string;
+  marketId: string;
+  marketTitle: string;
+  onchainMarketId: string | null;
+  outcome: "YES" | "NO";
+  potentialPayout: string;
+  potentialProfit: string;
+  stakeAmount: string;
+  stakeCurrency: string;
+  status: string;
+  targetPriceDisplay: string;
+  txHash: string | null;
+  unrealizedPnl: string;
+};
+
+type MeDcaStrategy = {
+  buyTokenSymbol: string;
+  createdAt: string;
+  frequency: string;
+  id: string;
+  orderAddress: string | null;
+  providerId: string;
+  sellAmount: string;
+  sellPerCycle: string;
+  sellTokenSymbol: string;
+  status: string;
+  strategyId: string;
+  txHash: string | null;
+};
+
+type MeYieldPosition = {
+  canWithdraw: boolean;
+  collateralAmount: string;
+  collateralTokenAddress: string;
+  collateralTokenDecimals: number;
+  collateralSymbol: string;
+  collateralUsdValue: string | null;
+  debtAmount: string | null;
+  debtSymbol: string | null;
+  debtUsdValue: string | null;
+  pool: string;
+  poolId: string;
+  type: string;
+};
+
+type MePortfolioSummary = {
+  activeDcaCount: number;
+  openPredictionCount: number;
+  totalPredictionStake: string;
+  totalPredictionUnrealizedPnl: string;
+  yieldPositionCount: number;
+};
+
+type MePortfolioPayload = {
+  dcaStrategies: MeDcaStrategy[];
+  predictionPositions: MePredictionPosition[];
+  summary: MePortfolioSummary;
+  yieldError: string | null;
+  yieldPositions: MeYieldPosition[];
+};
+
+type ManagedActionState =
+  | { message: string; status: "success" }
+  | { error: string; status: "error" }
+  | null;
+
+async function fetchMePortfolio(
+  getAccessToken: () => Promise<string | null>,
+) {
+  const token = await waitForPrivyAccessToken(getAccessToken);
+
+  if (!token) {
+    throw new Error("Privy access token was not ready");
+  }
+
+  const response = await fetch("/api/me/portfolio", {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | MePortfolioPayload
+    | { error?: string }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      typeof payload === "object" && payload && "error" in payload && payload.error
+        ? payload.error
+        : "Failed to load managed positions.",
+    );
+  }
+
+  return payload as MePortfolioPayload;
+}
+
+async function runManagedPositionAction(
+  getAccessToken: () => Promise<string | null>,
+  body:
+    | { kind: "prediction"; positionId: string }
+    | { kind: "dca"; positionId: string }
+    | {
+        collateralTokenAddress: string;
+        collateralTokenDecimals: number;
+        collateralTokenSymbol: string;
+        kind: "yield";
+        poolId: string;
+        positionType: string;
+      },
+) {
+  const token = await waitForPrivyAccessToken(getAccessToken);
+
+  if (!token) {
+    throw new Error("Privy access token was not ready");
+  }
+
+  const response = await fetch("/api/me/positions", {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: string; message?: string; txHash?: string }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(payload?.error ?? "Managed position action failed.");
+  }
+
+  return payload;
+}
+
+function shortRelativeTime(isoValue: string) {
+  const createdAt = new Date(isoValue);
+  const diffMs = Date.now() - createdAt.getTime();
+  const diffMinutes = Math.max(1, Math.round(diffMs / 60_000));
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function shortHash(value: string) {
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function frequencyLabel(value: string) {
+  if (value === "PT1H") return "Hourly";
+  if (value === "PT6H") return "Every 6h";
+  if (value === "P1D") return "Daily";
+  if (value === "P1W") return "Weekly";
+  return value;
+}
+
 export function MeView({
+  getAccessToken,
   signOutAction,
   updatePreferredNetworkAction,
   user,
 }: MeViewProps) {
+  const [portfolio, setPortfolio] = useState<MePortfolioPayload | null>(null);
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(true);
+  const [managedActionState, setManagedActionState] = useState<ManagedActionState>(null);
+  const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const username = user.username?.trim() || "stark-user";
   const handle = `@${username}.stark`;
   const profileName = handle;
@@ -39,6 +224,115 @@ export function MeView({
     : "No wallet linked";
   const activeNetwork =
     user.preferredNetwork === "sepolia" ? "Sepolia Side" : "Mainnet Side";
+  const summary = portfolio?.summary ?? {
+    activeDcaCount: 0,
+    openPredictionCount: 0,
+    totalPredictionStake: "$0.00",
+    totalPredictionUnrealizedPnl: "$0.00",
+    yieldPositionCount: 0,
+  };
+  const quickStats = useMemo(
+    () => [
+      { label: "Prediction P/L", value: summary.totalPredictionUnrealizedPnl },
+      { label: "Open Hedges", value: String(summary.openPredictionCount) },
+      { label: "Active DCA", value: String(summary.activeDcaCount) },
+      { label: "Yield Positions", value: String(summary.yieldPositionCount) },
+    ],
+    [summary],
+  );
+  const personalStats = useMemo(
+    () => [
+      {
+        accent: summary.totalPredictionStake,
+        label: "Prediction P/L",
+        value: summary.totalPredictionUnrealizedPnl,
+      },
+      {
+        accent: `${summary.activeDcaCount} DCA · ${summary.yieldPositionCount} yield`,
+        label: "Managed Positions",
+        value: String(
+          summary.openPredictionCount + summary.activeDcaCount + summary.yieldPositionCount,
+        ),
+      },
+    ],
+    [summary],
+  );
+
+  const loadPortfolio = useCallback(async () => {
+    setPortfolioLoading(true);
+    setPortfolioError(null);
+
+    try {
+      const payload = await fetchMePortfolio(getAccessToken);
+      setPortfolio(payload);
+    } catch (error) {
+      setPortfolioError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load managed positions.",
+      );
+    } finally {
+      setPortfolioLoading(false);
+    }
+  }, [getAccessToken]);
+
+  useEffect(() => {
+    void loadPortfolio();
+  }, [loadPortfolio, user.preferredNetwork, user.starknetAddress]);
+
+  const handleManagedAction = useCallback(
+    async (
+      actionKey: string,
+      options:
+        | {
+            confirmMessage: string;
+            request: { kind: "prediction"; positionId: string };
+          }
+        | {
+            confirmMessage: string;
+            request: { kind: "dca"; positionId: string };
+          }
+        | {
+            confirmMessage: string;
+            request: {
+              collateralTokenAddress: string;
+              collateralTokenDecimals: number;
+              collateralTokenSymbol: string;
+              kind: "yield";
+              poolId: string;
+              positionType: string;
+            };
+          },
+    ) => {
+      if (!window.confirm(options.confirmMessage)) {
+        return;
+      }
+
+      setPendingActionKey(actionKey);
+      setManagedActionState(null);
+
+      try {
+        const result = await runManagedPositionAction(getAccessToken, options.request);
+        await loadPortfolio();
+        setManagedActionState({
+          status: "success",
+          message:
+            result?.txHash != null
+              ? `${result.message ?? "Position updated."} Tx ${result.txHash.slice(0, 8)}...${result.txHash.slice(-6)}.`
+              : result?.message ?? "Position updated.",
+        });
+      } catch (error) {
+        setManagedActionState({
+          status: "error",
+          error:
+            error instanceof Error ? error.message : "Managed position action failed.",
+        });
+      } finally {
+        setPendingActionKey(null);
+      }
+    },
+    [getAccessToken, loadPortfolio],
+  );
 
   return (
     <TopbarAppShell
@@ -55,6 +349,17 @@ export function MeView({
         updatePreferredNetworkAction={updatePreferredNetworkAction}
         user={user}
         activeNetwork={activeNetwork}
+        dcaStrategies={portfolio?.dcaStrategies ?? []}
+        managedActionState={managedActionState}
+        onManagedAction={handleManagedAction}
+        pendingActionKey={pendingActionKey}
+        personalStats={personalStats}
+        portfolioError={portfolioError}
+        portfolioLoading={portfolioLoading}
+        predictionPositions={portfolio?.predictionPositions ?? []}
+        quickStats={quickStats}
+        yieldError={portfolio?.yieldError ?? null}
+        yieldPositions={portfolio?.yieldPositions ?? []}
       />
 
       <MobilePersonalHub
@@ -65,6 +370,16 @@ export function MeView({
         updatePreferredNetworkAction={updatePreferredNetworkAction}
         user={user}
         activeNetwork={activeNetwork}
+        dcaStrategies={portfolio?.dcaStrategies ?? []}
+        managedActionState={managedActionState}
+        onManagedAction={handleManagedAction}
+        pendingActionKey={pendingActionKey}
+        personalStats={personalStats}
+        portfolioError={portfolioError}
+        portfolioLoading={portfolioLoading}
+        predictionPositions={portfolio?.predictionPositions ?? []}
+        yieldError={portfolio?.yieldError ?? null}
+        yieldPositions={portfolio?.yieldPositions ?? []}
       />
     </TopbarAppShell>
   );
@@ -78,6 +393,17 @@ function DesktopPersonalHub({
   updatePreferredNetworkAction,
   user,
   activeNetwork,
+  dcaStrategies,
+  managedActionState,
+  onManagedAction,
+  pendingActionKey,
+  personalStats,
+  portfolioError,
+  portfolioLoading,
+  predictionPositions,
+  quickStats,
+  yieldError,
+  yieldPositions,
 }: {
   profileName: string;
   handle: string;
@@ -86,6 +412,39 @@ function DesktopPersonalHub({
   updatePreferredNetworkAction: (formData: FormData) => Promise<void>;
   user: MeViewProps["user"];
   activeNetwork: string;
+  dcaStrategies: MeDcaStrategy[];
+  managedActionState: ManagedActionState;
+  onManagedAction: (
+    actionKey: string,
+    options:
+      | {
+          confirmMessage: string;
+          request: { kind: "prediction"; positionId: string };
+        }
+      | {
+          confirmMessage: string;
+          request: { kind: "dca"; positionId: string };
+        }
+      | {
+          confirmMessage: string;
+          request: {
+            collateralTokenAddress: string;
+            collateralTokenDecimals: number;
+            collateralTokenSymbol: string;
+            kind: "yield";
+            poolId: string;
+            positionType: string;
+          };
+        },
+  ) => Promise<void>;
+  pendingActionKey: string | null;
+  personalStats: { accent: string; label: string; value: string }[];
+  portfolioError: string | null;
+  portfolioLoading: boolean;
+  predictionPositions: MePredictionPosition[];
+  quickStats: { label: string; value: string }[];
+  yieldError: string | null;
+  yieldPositions: MeYieldPosition[];
 }) {
   return (
     <section className="hidden md:block">
@@ -132,6 +491,17 @@ function DesktopPersonalHub({
         </div>
 
         <div className="space-y-6">
+          <ManagedPositionsPanel
+            dcaStrategies={dcaStrategies}
+            managedActionState={managedActionState}
+            onManagedAction={onManagedAction}
+            pendingActionKey={pendingActionKey}
+            portfolioError={portfolioError}
+            portfolioLoading={portfolioLoading}
+            predictionPositions={predictionPositions}
+            yieldError={yieldError}
+            yieldPositions={yieldPositions}
+          />
           <SecurityPanel email={user.email} />
           <PreferencesPanel />
 
@@ -166,6 +536,16 @@ function MobilePersonalHub({
   updatePreferredNetworkAction,
   user,
   activeNetwork,
+  dcaStrategies,
+  managedActionState,
+  onManagedAction,
+  pendingActionKey,
+  personalStats,
+  portfolioError,
+  portfolioLoading,
+  predictionPositions,
+  yieldError,
+  yieldPositions,
 }: {
   profileName: string;
   handle: string;
@@ -174,6 +554,38 @@ function MobilePersonalHub({
   updatePreferredNetworkAction: (formData: FormData) => Promise<void>;
   user: MeViewProps["user"];
   activeNetwork: string;
+  dcaStrategies: MeDcaStrategy[];
+  managedActionState: ManagedActionState;
+  onManagedAction: (
+    actionKey: string,
+    options:
+      | {
+          confirmMessage: string;
+          request: { kind: "prediction"; positionId: string };
+        }
+      | {
+          confirmMessage: string;
+          request: { kind: "dca"; positionId: string };
+        }
+      | {
+          confirmMessage: string;
+          request: {
+            collateralTokenAddress: string;
+            collateralTokenDecimals: number;
+            collateralTokenSymbol: string;
+            kind: "yield";
+            poolId: string;
+            positionType: string;
+          };
+        },
+  ) => Promise<void>;
+  pendingActionKey: string | null;
+  personalStats: { accent: string; label: string; value: string }[];
+  portfolioError: string | null;
+  portfolioLoading: boolean;
+  predictionPositions: MePredictionPosition[];
+  yieldError: string | null;
+  yieldPositions: MeYieldPosition[];
 }) {
   return (
     <section className="md:hidden">
@@ -208,18 +620,34 @@ function MobilePersonalHub({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-[#86a0ff]">
-              <SessionKeyIcon />
+              <PredictShieldIcon />
             </span>
-            <p className="text-[15px] font-semibold text-white">Session Keys</p>
+            <p className="text-[15px] font-semibold text-white">Managed Positions</p>
           </div>
-          <Toggle enabled={false} />
+          <span className="rounded-full bg-[#1c275d] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9db0ff]">
+            Live
+          </span>
         </div>
 
         <p className="mt-3 text-[13px] leading-6 text-[#98a4d3]">
-          Auto-sign transactions and skip biometric prompts for the next 2
-          hours. Securely stored in your local vault.
+          Track open prediction edges, active DCA plans, and yield positions from one place.
         </p>
       </section>
+
+      <div className="mt-4">
+        <ManagedPositionsPanel
+          compact
+          dcaStrategies={dcaStrategies}
+          managedActionState={managedActionState}
+          onManagedAction={onManagedAction}
+          pendingActionKey={pendingActionKey}
+          portfolioError={portfolioError}
+          portfolioLoading={portfolioLoading}
+          predictionPositions={predictionPositions}
+          yieldError={yieldError}
+          yieldPositions={yieldPositions}
+        />
+      </div>
 
       <div className="mt-5 space-y-3">
         <MobileSection title="Account & Security" items={accountLinks} />
@@ -406,6 +834,445 @@ function Avatar({
       <span className="absolute bottom-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-[#1d2141] bg-[#3151ff]">
         <CheckIcon />
       </span>
+    </div>
+  );
+}
+
+function ManagedPositionsPanel({
+  compact,
+  dcaStrategies,
+  managedActionState,
+  onManagedAction,
+  pendingActionKey,
+  portfolioError,
+  portfolioLoading,
+  predictionPositions,
+  yieldError,
+  yieldPositions,
+}: {
+  compact?: boolean;
+  dcaStrategies: MeDcaStrategy[];
+  managedActionState: ManagedActionState;
+  onManagedAction: (
+    actionKey: string,
+    options:
+      | {
+          confirmMessage: string;
+          request: { kind: "prediction"; positionId: string };
+        }
+      | {
+          confirmMessage: string;
+          request: { kind: "dca"; positionId: string };
+        }
+      | {
+          confirmMessage: string;
+          request: {
+            collateralTokenAddress: string;
+            collateralTokenDecimals: number;
+            collateralTokenSymbol: string;
+            kind: "yield";
+            poolId: string;
+            positionType: string;
+          };
+        },
+  ) => Promise<void>;
+  pendingActionKey: string | null;
+  portfolioError: string | null;
+  portfolioLoading: boolean;
+  predictionPositions: MePredictionPosition[];
+  yieldError: string | null;
+  yieldPositions: MeYieldPosition[];
+}) {
+  return (
+    <section className="rounded-[20px] border border-[#272c35] bg-[#1a1e25] px-5 py-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[#5c7eff]">
+            <PredictShieldIcon />
+          </span>
+          <h2 className="[font-family:var(--font-syne)] text-[24px] font-semibold text-white md:text-[28px]">
+            Managed Positions
+          </h2>
+        </div>
+        <span className="rounded-full bg-[#202636] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb9d6]">
+          Live
+        </span>
+      </div>
+
+      {portfolioError ? (
+        <div className="mt-5 rounded-[14px] border border-[#5e2626] bg-[#241313] px-4 py-3 text-[13px] text-[#ffb4b4]">
+          {portfolioError}
+        </div>
+      ) : null}
+
+      {managedActionState ? (
+        <div
+          className={`mt-5 rounded-[14px] border px-4 py-3 text-[13px] ${
+            managedActionState.status === "success"
+              ? "border-[#204b34] bg-[#0f1f17] text-[#9de0ba]"
+              : "border-[#5e2626] bg-[#241313] text-[#ffb4b4]"
+          }`}
+        >
+          {managedActionState.status === "success"
+            ? managedActionState.message
+            : managedActionState.error}
+        </div>
+      ) : null}
+
+      {portfolioLoading ? (
+        <div className="mt-5 rounded-[14px] border border-[#272c35] bg-[#14181f] px-4 py-10 text-center text-[13px] text-[#8e97aa]">
+          Loading your prediction, DCA, and yield positions...
+        </div>
+      ) : (
+        <div className={`mt-5 grid gap-4 ${compact ? "" : "xl:grid-cols-3"}`}>
+          <PredictionPositionsCard
+            onManagedAction={onManagedAction}
+            pendingActionKey={pendingActionKey}
+            positions={predictionPositions}
+          />
+          <DcaStrategiesCard
+            onManagedAction={onManagedAction}
+            pendingActionKey={pendingActionKey}
+            strategies={dcaStrategies}
+          />
+          <YieldPositionsCard
+            error={yieldError}
+            onManagedAction={onManagedAction}
+            pendingActionKey={pendingActionKey}
+            positions={yieldPositions}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PredictionPositionsCard({
+  onManagedAction,
+  pendingActionKey,
+  positions,
+}: {
+  onManagedAction: (
+    actionKey: string,
+    options: {
+      confirmMessage: string;
+      request: { kind: "prediction"; positionId: string };
+    },
+  ) => Promise<void>;
+  pendingActionKey: string | null;
+  positions: MePredictionPosition[];
+}) {
+  return (
+    <section className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+        Prediction Book
+      </p>
+      <div className="mt-4 space-y-3">
+        {positions.length === 0 ? (
+          <p className="text-[12px] leading-6 text-[#8e97aa]">
+            No prediction positions yet.
+          </p>
+        ) : (
+          positions.slice(0, 5).map((position) => (
+            <div
+              key={position.id}
+              className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-white">
+                    {position.marketTitle}
+                  </p>
+                  <p className="mt-1 text-[12px] text-[#8e97aa]">
+                    {position.outcome} · {position.stakeAmount} {position.stakeCurrency}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                    position.direction === "gaining"
+                      ? "bg-[#123523] text-[#7ce2ad]"
+                      : position.direction === "losing"
+                        ? "bg-[#3d1b1b] text-[#ffabab]"
+                        : "bg-[#232836] text-[#c1c8d8]"
+                  }`}
+                >
+                  {position.direction}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <MiniMetric label="Unrealized P/L" value={position.unrealizedPnl} />
+                <MiniMetric label="Marked Value" value={position.currentMarkValue} />
+                <MiniMetric
+                  label="Current Odds"
+                  value={`${position.currentProbability}%`}
+                />
+                <MiniMetric label="Potential Profit" value={position.potentialProfit} />
+              </div>
+
+              <p className="mt-3 text-[11px] text-[#7d8699]">
+                Target {position.targetPriceDisplay} · Entry {position.entryProbability}% · Logged{" "}
+                {shortRelativeTime(position.createdAt)}
+              </p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8e97aa]">
+                  {position.status} · {position.executionMode}
+                </span>
+                {position.status === "OPEN" && position.executionMode !== "ONCHAIN" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onManagedAction(`prediction:${position.id}`, {
+                        confirmMessage: "Do you want to cancel this prediction?",
+                        request: {
+                          kind: "prediction",
+                          positionId: position.id,
+                        },
+                      });
+                    }}
+                    disabled={pendingActionKey === `prediction:${position.id}`}
+                    className="rounded-[10px] border border-[#3b4050] px-3 py-2 text-[11px] font-semibold text-white transition hover:border-[#ff7c7c] disabled:opacity-60"
+                  >
+                    {pendingActionKey === `prediction:${position.id}`
+                      ? "Cancelling..."
+                      : "Cancel"}
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-[#7d8699]">
+                    {position.executionMode === "ONCHAIN"
+                      ? "Locked onchain"
+                      : "No action"}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DcaStrategiesCard({
+  onManagedAction,
+  pendingActionKey,
+  strategies,
+}: {
+  onManagedAction: (
+    actionKey: string,
+    options: {
+      confirmMessage: string;
+      request: { kind: "dca"; positionId: string };
+    },
+  ) => Promise<void>;
+  pendingActionKey: string | null;
+  strategies: MeDcaStrategy[];
+}) {
+  return (
+    <section className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+        DCA Strategies
+      </p>
+      <div className="mt-4 space-y-3">
+        {strategies.length === 0 ? (
+          <p className="text-[12px] leading-6 text-[#8e97aa]">
+            No DCA strategies created yet.
+          </p>
+        ) : (
+          strategies.slice(0, 5).map((strategy) => (
+            <div
+              key={strategy.id}
+              className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-white">
+                    {strategy.sellTokenSymbol} → {strategy.buyTokenSymbol}
+                  </p>
+                  <p className="mt-1 text-[12px] text-[#8e97aa]">
+                    {strategy.sellPerCycle} every {frequencyLabel(strategy.frequency)}
+                  </p>
+                </div>
+                <span className="rounded-full bg-[#202636] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#b7c2dc]">
+                  {strategy.status}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <MiniMetric label="Budget" value={strategy.sellAmount} />
+                <MiniMetric label="Frequency" value={frequencyLabel(strategy.frequency)} />
+              </div>
+
+              <p className="mt-3 text-[11px] text-[#7d8699]">
+                Provider {strategy.providerId} · Logged {shortRelativeTime(strategy.createdAt)}
+              </p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-[#7d8699]">
+                  {strategy.orderAddress ? shortHash(strategy.orderAddress) : "No order address"}
+                </span>
+                {strategy.status !== "CLOSED" && strategy.orderAddress ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onManagedAction(`dca:${strategy.id}`, {
+                        confirmMessage: "Do you want to cancel this DCA strategy?",
+                        request: {
+                          kind: "dca",
+                          positionId: strategy.id,
+                        },
+                      });
+                    }}
+                    disabled={pendingActionKey === `dca:${strategy.id}`}
+                    className="rounded-[10px] border border-[#3b4050] px-3 py-2 text-[11px] font-semibold text-white transition hover:border-[#ff7c7c] disabled:opacity-60"
+                  >
+                    {pendingActionKey === `dca:${strategy.id}`
+                      ? "Cancelling..."
+                      : "Cancel"}
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-[#7d8699]">Closed</span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function YieldPositionsCard({
+  error,
+  onManagedAction,
+  pendingActionKey,
+  positions,
+}: {
+  error: string | null;
+  onManagedAction: (
+    actionKey: string,
+    options: {
+      confirmMessage: string;
+      request: {
+        collateralTokenAddress: string;
+        collateralTokenDecimals: number;
+        collateralTokenSymbol: string;
+        kind: "yield";
+        poolId: string;
+        positionType: string;
+      };
+    },
+  ) => Promise<void>;
+  pendingActionKey: string | null;
+  positions: MeYieldPosition[];
+}) {
+  return (
+    <section className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+        Yield Positions
+      </p>
+      <div className="mt-4 space-y-3">
+        {error ? (
+          <p className="text-[12px] leading-6 text-[#ffb4b4]">{error}</p>
+        ) : positions.length === 0 ? (
+          <p className="text-[12px] leading-6 text-[#8e97aa]">
+            No live yield positions found.
+          </p>
+        ) : (
+          positions.slice(0, 5).map((position, index) => (
+            <div
+              key={`${position.poolId}:${position.collateralTokenAddress}:${index}`}
+              className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-white">{position.pool}</p>
+                  <p className="mt-1 text-[12px] text-[#8e97aa]">
+                    {position.type}
+                  </p>
+                </div>
+                <span className="rounded-full bg-[#132a46] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#97c2ff]">
+                  Live
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <MiniMetric
+                  label="Collateral"
+                  value={`${position.collateralAmount}`}
+                />
+                <MiniMetric
+                  label="Collateral USD"
+                  value={position.collateralUsdValue ?? "Unavailable"}
+                />
+                <MiniMetric
+                  label="Debt"
+                  value={
+                    position.debtAmount && position.debtSymbol
+                      ? `${position.debtAmount}`
+                      : "None"
+                  }
+                />
+                <MiniMetric
+                  label="Debt USD"
+                  value={position.debtUsdValue ?? "None"}
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-[#7d8699]">
+                  {position.type === "earn" ? "Withdraw available" : "Repay required"}
+                </span>
+                {position.canWithdraw ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onManagedAction(`yield:${position.poolId}:${position.collateralTokenAddress}`, {
+                        confirmMessage: "Do you want to withdraw this yield position?",
+                        request: {
+                          collateralTokenAddress: position.collateralTokenAddress,
+                          collateralTokenDecimals: position.collateralTokenDecimals,
+                          collateralTokenSymbol: position.collateralSymbol,
+                          kind: "yield",
+                          poolId: position.poolId,
+                          positionType: position.type,
+                        },
+                      });
+                    }}
+                    disabled={
+                      pendingActionKey ===
+                      `yield:${position.poolId}:${position.collateralTokenAddress}`
+                    }
+                    className="rounded-[10px] border border-[#3b4050] px-3 py-2 text-[11px] font-semibold text-white transition hover:border-[#7cb1ff] disabled:opacity-60"
+                  >
+                    {pendingActionKey ===
+                    `yield:${position.poolId}:${position.collateralTokenAddress}`
+                      ? "Withdrawing..."
+                      : "Withdraw"}
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-[#7d8699]">Manage in Move</span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MiniMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[12px] border border-[#232834] bg-[#151920] px-3 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+        {label}
+      </p>
+      <p className="mt-2 text-[13px] font-semibold text-white">{value}</p>
     </div>
   );
 }
@@ -864,6 +1731,26 @@ function LockIcon() {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PredictShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+      <path
+        d="M12 3 18 5.5V11c0 4.2-2.6 7.3-6 8.9C8.6 18.3 6 15.2 6 11V5.5L12 3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.5 12.5 11 14l3.5-4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );

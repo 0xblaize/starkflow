@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { TopbarAppShell } from "@/components/app-shell/shell";
+import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
 import {
   dashboardTabs,
   feedEmptyStates,
@@ -52,8 +53,36 @@ type ActivityItem = {
   txHash: string;
 };
 
+type DashboardPredictMarket = {
+  currentPriceDisplay: string;
+  description: string;
+  id: string;
+  onchainMarketId: string;
+  state: string;
+  targetPriceDisplay: string;
+  timeframe: string;
+  title: string;
+  totalVolumeDisplay: string;
+  yesProbability: number;
+  noProbability: number;
+};
+
+type DashboardPredictPayload = {
+  markets: DashboardPredictMarket[];
+  onchainExecutionLive: boolean;
+};
+
 const balanceMemoryCache = new Map<string, LiveBalances>();
 const activityMemoryCache = new Map<string, ActivityItem[]>();
+let dashboardPredictCache:
+  | {
+      expiresAt: number;
+      payload: {
+        featuredMarket: DashboardPredictMarket | null;
+        onchainExecutionLive: boolean;
+      };
+    }
+  | null = null;
 
 function parseNumericValue(value?: string | null) {
   if (!value) return 0;
@@ -204,7 +233,7 @@ export function DashboardView({
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <PredictionMarketPanel />
+        <PredictionMarketPanel getAccessToken={getAccessToken} />
         <aside className="space-y-5">
           <SecurityHealthPanel />
           <SearchUsersPanel />
@@ -214,6 +243,49 @@ export function DashboardView({
       <ActivityPanel activity={activity} preferredNetwork={preferredNetwork} />
     </TopbarAppShell>
   );
+}
+
+async function fetchDashboardPredictState(
+  getAccessToken: () => Promise<string | null>,
+) {
+  if (dashboardPredictCache && dashboardPredictCache.expiresAt > Date.now()) {
+    return dashboardPredictCache.payload;
+  }
+
+  const token = await waitForPrivyAccessToken(getAccessToken);
+
+  if (!token) {
+    throw new Error("Privy access token was not ready");
+  }
+
+  const response = await fetch("/api/predict/markets", {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Predict dashboard feed failed with status ${response.status}.`);
+  }
+
+  const payload = (await response.json()) as DashboardPredictPayload;
+  const featuredMarket =
+    payload.markets.find((market) => market.onchainMarketId === "BTC24HUP") ??
+    payload.markets[0] ??
+    null;
+
+  const nextPayload = {
+    featuredMarket,
+    onchainExecutionLive: payload.onchainExecutionLive,
+  };
+
+  dashboardPredictCache = {
+    expiresAt: Date.now() + 20_000,
+    payload: nextPayload,
+  };
+
+  return nextPayload;
 }
 
 function DashboardHeader({ signOutAction, user }: DashboardViewProps) {
@@ -638,7 +710,97 @@ function DepositVisual() {
   );
 }
 
-function PredictionMarketPanel() {
+function PredictionMarketPanel({
+  getAccessToken,
+}: {
+  getAccessToken: () => Promise<string | null>;
+}) {
+  const [featuredMarket, setFeaturedMarket] = useState<DashboardPredictMarket | null>(null);
+  const [onchainExecutionLive, setOnchainExecutionLive] = useState(false);
+  const [loadingMarket, setLoadingMarket] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFeaturedMarket() {
+      setLoadingMarket(true);
+
+      try {
+        const payload = await fetchDashboardPredictState(getAccessToken);
+
+        if (!cancelled) {
+          setFeaturedMarket(payload.featuredMarket);
+          setOnchainExecutionLive(payload.onchainExecutionLive);
+        }
+      } catch {
+        if (!cancelled) {
+          setFeaturedMarket(null);
+          setOnchainExecutionLive(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingMarket(false);
+        }
+      }
+    }
+
+    void loadFeaturedMarket();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getAccessToken]);
+
+  if (loadingMarket && !featuredMarket) {
+    return (
+      <section className="rounded-[20px] border border-[#103a56] bg-[linear-gradient(180deg,#081927,#0a1018)] px-5 py-5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="rounded-full bg-[#0b3550] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8fd4ff]">
+            Prediction Market
+          </span>
+          <span className="text-[12px] font-medium text-[#93c7ef]">
+            Loading...
+          </span>
+        </div>
+        <p className="mt-6 text-[14px] leading-7 text-[#9eb7ca]">
+          Loading the live predict market feed.
+        </p>
+      </section>
+    );
+  }
+
+  if (!featuredMarket) {
+    return (
+      <section className="rounded-[20px] border border-[#103a56] bg-[linear-gradient(180deg,#081927,#0a1018)] px-5 py-5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="rounded-full bg-[#0b3550] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8fd4ff]">
+            Prediction Market
+          </span>
+          <span className="text-[12px] font-medium text-[#93c7ef]">
+            Predict
+          </span>
+        </div>
+        <h3 className="mt-5 [font-family:var(--font-syne)] text-[28px] leading-tight md:text-[34px]">
+          Open the live prediction book
+        </h3>
+        <p className="mt-3 max-w-[900px] text-[14px] leading-7 text-[#9eb7ca]">
+          The dashboard could not hydrate the featured market, but the Predict page is still available.
+        </p>
+        <div className="mt-6">
+          <Link
+            href="/predict"
+            className="inline-flex h-12 items-center rounded-[12px] bg-[#3151ff] px-5 text-[15px] font-bold text-white"
+          >
+            Open Predict
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  const yesHref = `/predict?market=${encodeURIComponent(featuredMarket.id)}&outcome=YES`;
+  const noHref = `/predict?market=${encodeURIComponent(featuredMarket.id)}&outcome=NO`;
+
   return (
     <section className="rounded-[20px] border border-[#103a56] bg-[linear-gradient(180deg,#081927,#0a1018)] px-5 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -646,37 +808,64 @@ function PredictionMarketPanel() {
           Prediction Market
         </span>
         <span className="text-[12px] font-medium text-[#93c7ef]">
-          Pragma Oracle
+          {onchainExecutionLive ? "Sepolia escrow live" : "Record only"}
         </span>
       </div>
 
       <h3 className="mt-5 [font-family:var(--font-syne)] text-[28px] leading-tight md:text-[34px]">
-        Will Bitcoin trade above $100k before this cycle closes?
+        {featuredMarket.title}
       </h3>
 
       <p className="mt-3 max-w-[900px] text-[14px] leading-7 text-[#9eb7ca]">
-        This card stays empty until the market module is live. The layout is
-        ready, but odds, volume, and execution stay honest instead of faking
-        activity.
+        {featuredMarket.description}
       </p>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <div className="rounded-[12px] border border-[#174362] bg-[#0b1621] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fc9ef]">
+            Current Price
+          </p>
+          <p className="mt-2 text-[14px] font-semibold text-white">
+            {featuredMarket.currentPriceDisplay}
+          </p>
+        </div>
+        <div className="rounded-[12px] border border-[#174362] bg-[#0b1621] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fc9ef]">
+            Target
+          </p>
+          <p className="mt-2 text-[14px] font-semibold text-white">
+            {featuredMarket.targetPriceDisplay}
+          </p>
+        </div>
+        <div className="rounded-[12px] border border-[#174362] bg-[#0b1621] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fc9ef]">
+            Tracked Volume
+          </p>
+          <p className="mt-2 text-[14px] font-semibold text-white">
+            {featuredMarket.totalVolumeDisplay}
+          </p>
+        </div>
+      </div>
 
       <div className="mt-6 grid gap-3 md:grid-cols-2">
         <Link
-          href="/predict"
-          className="h-12 rounded-[12px] bg-[#2dcf6c] text-[15px] font-bold text-black opacity-70"
+          href={yesHref}
+          className="flex h-12 items-center justify-between rounded-[12px] bg-[#2dcf6c] px-4 text-[15px] font-bold text-black"
         >
-          YES
+          <span>YES</span>
+          <span>{featuredMarket.yesProbability}%</span>
         </Link>
         <Link
-          href="/predict"
-          className="h-12 rounded-[12px] bg-[#f14e52] text-[15px] font-bold text-white opacity-70"
+          href={noHref}
+          className="flex h-12 items-center justify-between rounded-[12px] bg-[#f14e52] px-4 text-[15px] font-bold text-white"
         >
-          NO
+          <span>NO</span>
+          <span>{featuredMarket.noProbability}%</span>
         </Link>
       </div>
 
       <p className="mt-4 text-[12px] text-[#88b1cb]">
-        One-click execution via Session Keys. No pop-ups.
+        {featuredMarket.state} · {featuredMarket.timeframe} · Opens Predict with this market selected.
       </p>
     </section>
   );

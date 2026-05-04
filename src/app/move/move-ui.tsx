@@ -3,18 +3,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuthorizationSignature } from "@privy-io/react-auth";
 import {
-  ConnectedEthereumWallet,
   type Eip1193Provider,
-  EthereumNetwork,
 } from "../../../node_modules/starkzap/dist/src/connect/evm.js";
 import {
-  ConnectedSolanaWallet,
-  SolanaNetwork,
   type SolanaProvider,
 } from "../../../node_modules/starkzap/dist/src/connect/solana.js";
 import type { Address } from "../../../node_modules/starkzap/dist/src/types/address.js";
-import { ExternalChain } from "../../../node_modules/starkzap/dist/src/types/bridge/external-chain.js";
-import { ChainId } from "../../../node_modules/starkzap/dist/src/types/config.js";
 import type { Token } from "../../../node_modules/starkzap/dist/src/types/token.js";
 import { TopbarAppShell } from "@/components/app-shell/shell";
 import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
@@ -28,6 +22,8 @@ import {
 } from "./move-data";
 
 type MoveMode = "send" | "swap" | "bridge";
+type BridgeExternalChain = "ethereum" | "solana";
+type BridgeEndpoint = "starknet" | BridgeExternalChain;
 
 type MoveCenterViewProps = {
   getAccessToken: () => Promise<string | null>;
@@ -181,7 +177,53 @@ type SubmitState =
 
 type BridgeConnectorState = {
   address: string;
+  chain: BridgeExternalChain;
   networkLabel: string;
+  walletName: string;
+};
+
+type BridgeWalletOption = {
+  chain: BridgeExternalChain;
+  id: string;
+  name: string;
+  provider: Eip1193Provider | SolanaProvider;
+};
+
+type BridgeWalletPickerState = {
+  chain: BridgeExternalChain;
+  options: BridgeWalletOption[];
+} | null;
+
+type BridgeDisplayToken = {
+  address: string;
+  bridgeAddress: string;
+  chain: BridgeExternalChain;
+  decimals: number;
+  id: string;
+  name: string;
+  protocol: string;
+  starknetAddress: string;
+  starknetBridge: string;
+  symbol: string;
+};
+
+type EthereumInjectedProvider = Eip1193Provider & {
+  isBraveWallet?: boolean;
+  isCoinbaseWallet?: boolean;
+  isMetaMask?: boolean;
+  isOKXWallet?: boolean;
+  isRabby?: boolean;
+  isTrust?: boolean;
+  providers?: Eip1193Provider[];
+};
+
+type SolanaInjectedProvider = SolanaProvider & {
+  connect?: () => Promise<{ publicKey?: { toString(): string } }>;
+  isBackpack?: boolean;
+  isCoin98?: boolean;
+  isPhantom?: boolean;
+  isSolflare?: boolean;
+  publicKey?: { toString(): string };
 };
 
 const moveTokenListCache = new Map<string, MoveTokenOption[]>();
@@ -219,17 +261,27 @@ async function fetchPrivyJson<T>(
     },
     cache: "no-store",
   });
+  const rawBody = await response.text();
+  const payload = (() => {
+    if (!rawBody) {
+      return null;
+    }
 
-  const payload = (await response.json().catch(() => null)) as
-    | T
-    | { error?: string }
-    | null;
+    try {
+      return JSON.parse(rawBody) as T | { error?: string };
+    } catch {
+      return null;
+    }
+  })();
 
   if (!response.ok) {
-    throw new Error(
+    const detail =
       typeof payload === "object" && payload && "error" in payload && payload.error
         ? payload.error
-        : `Request failed with status ${response.status}`,
+        : rawBody?.trim() || "No error body returned.";
+
+    throw new Error(
+      `${input} failed with status ${response.status}: ${detail}`,
     );
   }
 
@@ -238,6 +290,153 @@ async function fetchPrivyJson<T>(
 
 function shortHash(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function normalizeBridgeSymbol(symbol: string) {
+  const upper = symbol.toUpperCase();
+
+  if (upper.includes("USDC")) return "USDC";
+  if (upper.includes("USDT")) return "USDT";
+  if (upper.includes("ETH")) return "ETH";
+  if (upper.includes("SOL")) return "SOL";
+
+  return upper;
+}
+
+function getBridgeEndpointLabel(
+  endpoint: BridgeEndpoint,
+  preferredNetwork: "mainnet" | "sepolia",
+) {
+  if (endpoint === "starknet") {
+    return preferredNetwork === "mainnet" ? "Starknet Mainnet" : "Starknet Sepolia";
+  }
+
+  if (endpoint === "ethereum") {
+    return preferredNetwork === "mainnet" ? "Ethereum Mainnet" : "Ethereum Sepolia";
+  }
+
+  return preferredNetwork === "mainnet" ? "Solana Mainnet" : "Solana Devnet";
+}
+
+function getBridgeDisplayTokens(
+  tokens: BridgeRouteResponse["tokens"],
+  chain: BridgeExternalChain,
+) {
+  const allowedSymbols =
+    chain === "ethereum"
+      ? new Set(["ETH", "USDC", "USDT"])
+      : new Set(["SOL", "USDC", "USDT"]);
+  const seenSymbols = new Set<string>();
+  const bridgeTokens: BridgeDisplayToken[] = [];
+
+  for (const token of tokens) {
+    if (token.chain !== chain) {
+      continue;
+    }
+
+    const symbol = normalizeBridgeSymbol(token.symbol);
+
+    if (!allowedSymbols.has(symbol) || seenSymbols.has(symbol)) {
+      continue;
+    }
+
+    seenSymbols.add(symbol);
+    bridgeTokens.push({
+      ...token,
+      chain,
+      symbol,
+    });
+  }
+
+  return bridgeTokens;
+}
+
+function getEthereumWalletName(provider: EthereumInjectedProvider) {
+  if (provider.isRabby) return "Rabby";
+  if (provider.isCoinbaseWallet) return "Coinbase Wallet";
+  if (provider.isOKXWallet) return "OKX Wallet";
+  if (provider.isTrust) return "Trust Wallet";
+  if (provider.isBraveWallet) return "Brave Wallet";
+  if (provider.isMetaMask) return "MetaMask";
+
+  return "Injected Ethereum Wallet";
+}
+
+function getSolanaWalletName(provider: SolanaInjectedProvider) {
+  if (provider.isBackpack) return "Backpack";
+  if (provider.isSolflare) return "Solflare";
+  if (provider.isCoin98) return "Coin98";
+  if (provider.isPhantom) return "Phantom";
+
+  return "Injected Solana Wallet";
+}
+
+function detectEthereumWalletOptions() {
+  const injected = (window as Window & { ethereum?: EthereumInjectedProvider }).ethereum;
+
+  if (!injected) {
+    return [] as BridgeWalletOption[];
+  }
+
+  const providers =
+    injected.providers && injected.providers.length > 0
+      ? injected.providers.map(
+          (provider: Eip1193Provider) => provider as EthereumInjectedProvider,
+        )
+      : [injected];
+  const seen = new Set<Eip1193Provider>();
+
+  return providers.flatMap((provider: EthereumInjectedProvider, index: number) => {
+    if (seen.has(provider)) {
+      return [];
+    }
+
+    seen.add(provider);
+
+    return [
+      {
+        chain: "ethereum" as const,
+        id: `ethereum:${getEthereumWalletName(provider)}:${index}`,
+        name: getEthereumWalletName(provider),
+        provider,
+      },
+    ];
+  });
+}
+
+function detectSolanaWalletOptions() {
+  const injected = window as Window & {
+    backpack?: { solana?: SolanaInjectedProvider };
+    coin98?: { solana?: SolanaInjectedProvider };
+    phantom?: { solana?: SolanaInjectedProvider };
+    solflare?: SolanaInjectedProvider;
+    solana?: SolanaInjectedProvider;
+  };
+  const providers = [
+    injected.phantom?.solana,
+    injected.backpack?.solana,
+    injected.solflare,
+    injected.coin98?.solana,
+    injected.solana,
+  ].filter((provider): provider is SolanaInjectedProvider => Boolean(provider));
+  const seen = new Set<SolanaProvider>();
+
+  return providers.flatMap((provider: SolanaInjectedProvider, index: number) => {
+    if (seen.has(provider)) {
+      return [];
+    }
+
+    seen.add(provider);
+
+    return [
+      {
+        chain: "solana" as const,
+        id: `solana:${getSolanaWalletName(provider)}:${index}`,
+        name: getSolanaWalletName(provider),
+        provider,
+      },
+    ];
+  });
 }
 
 function sleep(ms: number) {
@@ -483,6 +682,7 @@ function MainMovePanel({
               getAccessToken={getAccessToken}
               identityToken={identityToken}
               preferredNetwork={preferredNetwork}
+              starknetAddress={starknetAddress}
             />
           ) : null}
       </div>
@@ -1596,133 +1796,71 @@ function BridgePanel({
   getAccessToken,
   identityToken,
   preferredNetwork,
-}: Pick<MoveCenterViewProps, "getAccessToken" | "identityToken" | "preferredNetwork">) {
+  starknetAddress,
+}: Pick<
+  MoveCenterViewProps,
+  "getAccessToken" | "identityToken" | "preferredNetwork" | "starknetAddress"
+>) {
   const [bridgeData, setBridgeData] = useState<BridgeRouteResponse | null>(null);
   const [ethereumWallet, setEthereumWallet] = useState<BridgeConnectorState | null>(null);
   const [loading, setLoading] = useState(true);
   const [solanaWallet, setSolanaWallet] = useState<BridgeConnectorState | null>(null);
+  const [selectedExternalChain, setSelectedExternalChain] =
+    useState<BridgeExternalChain>("ethereum");
+  const [direction, setDirection] = useState<"into_starknet" | "out_of_starknet">(
+    "into_starknet",
+  );
+  const [selectedSymbols, setSelectedSymbols] = useState<
+    Record<BridgeExternalChain, string>
+  >({
+    ethereum: "ETH",
+    solana: "SOL",
+  });
+  const [amount, setAmount] = useState("");
+  const [walletPicker, setWalletPicker] = useState<BridgeWalletPickerState>(null);
   const [state, setState] = useState<SubmitState>(null);
   const [connecting, setConnecting] = useState<"ethereum" | "solana" | null>(null);
 
-  const hasConnectedWallet = Boolean(ethereumWallet || solanaWallet);
+  const bridgeTokens = useMemo(
+    () => getBridgeDisplayTokens(bridgeData?.tokens ?? [], selectedExternalChain),
+    [bridgeData, selectedExternalChain],
+  );
 
-  async function handleConnectEthereum() {
-    const provider = (window as Window & { ethereum?: Eip1193Provider }).ethereum;
+  const selectedToken = useMemo(() => {
+    const preferredSymbol = selectedSymbols[selectedExternalChain];
 
-    if (!provider) {
-      setState({
-        status: "error",
-        error: "No injected Ethereum wallet was found. Open MetaMask or another EVM wallet first.",
-      });
+    return (
+      bridgeTokens.find((token) => token.symbol === preferredSymbol) ??
+      bridgeTokens[0] ??
+      null
+    );
+  }, [bridgeTokens, selectedExternalChain, selectedSymbols]);
+
+  const activeExternalWallet =
+    selectedExternalChain === "ethereum" ? ethereumWallet : solanaWallet;
+  const sourceEndpoint: BridgeEndpoint =
+    direction === "into_starknet" ? selectedExternalChain : "starknet";
+  const destinationEndpoint: BridgeEndpoint =
+    sourceEndpoint === "starknet" ? selectedExternalChain : "starknet";
+
+  useEffect(() => {
+    if (bridgeTokens.length === 0) {
       return;
     }
 
-    setConnecting("ethereum");
-    setState(null);
+    setSelectedSymbols((current) => {
+      const currentSymbol = current[selectedExternalChain];
 
-    try {
-      const accounts = (await provider.request({
-        method: "eth_requestAccounts",
-      })) as string[];
-      const chainId = (await provider.request({
-        method: "eth_chainId",
-      })) as string;
-      const starknetChain =
-        preferredNetwork === "mainnet" ? ChainId.MAINNET : ChainId.SEPOLIA;
-      const wallet = await ConnectedEthereumWallet.from(
-        {
-          address: accounts[0] ?? "",
-          chain: ExternalChain.ETHEREUM,
-          chainId,
-          provider,
-        },
-        starknetChain,
-      );
-
-      setEthereumWallet({
-        address: wallet.address,
-        networkLabel:
-          wallet.network === EthereumNetwork.MAINNET
-            ? "Ethereum Mainnet"
-            : "Ethereum Sepolia",
-      });
-      setState({
-        status: "success",
-        message: `Ethereum wallet ${shortHash(wallet.address)} connected.`,
-      });
-    } catch (error) {
-      setState({
-        status: "error",
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to connect the Ethereum wallet.",
-      });
-    } finally {
-      setConnecting(null);
-    }
-  }
-
-  async function handleConnectSolana() {
-    const provider = (
-      window as Window & {
-        solana?: SolanaProvider & {
-          connect?: () => Promise<{ publicKey: { toString(): string } }>;
-        };
+      if (bridgeTokens.some((token) => token.symbol === currentSymbol)) {
+        return current;
       }
-    ).solana;
 
-    if (!provider?.connect) {
-      setState({
-        status: "error",
-        error: "No injected Solana wallet was found. Open Phantom or another Solana wallet first.",
-      });
-      return;
-    }
-
-    setConnecting("solana");
-    setState(null);
-
-    try {
-      const connection = await provider.connect();
-      const starknetChain =
-        preferredNetwork === "mainnet" ? ChainId.MAINNET : ChainId.SEPOLIA;
-      const wallet = await ConnectedSolanaWallet.from(
-        {
-          address: connection.publicKey.toString(),
-          chain: ExternalChain.SOLANA,
-          chainId:
-            preferredNetwork === "mainnet"
-              ? SolanaNetwork.MAINNET
-              : SolanaNetwork.TESTNET,
-          provider,
-        },
-        starknetChain,
-      );
-
-      setSolanaWallet({
-        address: wallet.address,
-        networkLabel:
-          wallet.network === SolanaNetwork.MAINNET
-            ? "Solana Mainnet"
-            : "Solana Testnet",
-      });
-      setState({
-        status: "success",
-        message: `Solana wallet ${shortHash(wallet.address)} connected.`,
-      });
-    } catch (error) {
-      setState({
-        status: "error",
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to connect the Solana wallet.",
-      });
-    } finally {
-      setConnecting(null);
-    }
-  }
+      return {
+        ...current,
+        [selectedExternalChain]: bridgeTokens[0]!.symbol,
+      };
+    });
+  }, [bridgeTokens, selectedExternalChain]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1763,7 +1901,154 @@ function BridgePanel({
     return () => {
       cancelled = true;
     };
-  }, [getAccessToken]);
+  }, [getAccessToken, identityToken]);
+
+  function openWalletPicker(chain: BridgeExternalChain) {
+    const options =
+      chain === "ethereum" ? detectEthereumWalletOptions() : detectSolanaWalletOptions();
+
+    if (options.length === 0) {
+      setState({
+        status: "error",
+        error:
+          chain === "ethereum"
+            ? "No injected Ethereum wallets were found. Open MetaMask, Rabby, or Coinbase Wallet first."
+            : "No injected Solana wallets were found. Open Phantom, Solflare, or Backpack first.",
+      });
+      return;
+    }
+
+    setWalletPicker({ chain, options });
+    setState(null);
+  }
+
+  async function handleConnectWallet(option: BridgeWalletOption) {
+    setConnecting(option.chain);
+    setState(null);
+
+    try {
+      if (option.chain === "ethereum") {
+        const provider = option.provider as EthereumInjectedProvider;
+        const accounts = (await provider.request({
+          method: "eth_requestAccounts",
+        })) as string[];
+        const chainId = (await provider.request({
+          method: "eth_chainId",
+        })) as string;
+        const address = accounts[0]?.trim();
+
+        if (!address) {
+          throw new Error("The selected Ethereum wallet did not return an account.");
+        }
+
+        setEthereumWallet({
+          address,
+          chain: "ethereum",
+          networkLabel:
+            chainId === "0x1"
+              ? "Ethereum Mainnet"
+              : chainId === "0xaa36a7"
+                ? "Ethereum Sepolia"
+                : `Ethereum ${chainId}`,
+          walletName: option.name,
+        });
+        setState({
+          status: "success",
+          message: `${option.name} connected for Ethereum bridge routes.`,
+        });
+      } else {
+        const provider = option.provider as SolanaInjectedProvider;
+        const connection = await provider.connect?.();
+        const address =
+          connection?.publicKey?.toString() ?? provider.publicKey?.toString() ?? "";
+
+        if (!address) {
+          throw new Error("The selected Solana wallet did not return a public key.");
+        }
+
+        setSolanaWallet({
+          address,
+          chain: "solana",
+          networkLabel:
+            preferredNetwork === "mainnet" ? "Solana Mainnet" : "Solana Devnet",
+          walletName: option.name,
+        });
+        setState({
+          status: "success",
+          message: `${option.name} connected for Solana bridge routes.`,
+        });
+      }
+
+      setWalletPicker(null);
+    } catch (error) {
+      setState({
+        status: "error",
+        error:
+          error instanceof Error ? error.message : "Failed to connect the external wallet.",
+      });
+    } finally {
+      setConnecting(null);
+    }
+  }
+
+  function handleReviewBridge() {
+    if (!selectedToken) {
+      setState({
+        status: "error",
+        error: "No bridge asset is available for the selected chain.",
+      });
+      return;
+    }
+
+    if (!amount.trim()) {
+      setState({
+        status: "error",
+        error: "Enter an amount to bridge.",
+      });
+      return;
+    }
+
+    if (!starknetAddress) {
+      setState({
+        status: "error",
+        error: "Connect your Starknet wallet in StarkFlow before bridging.",
+      });
+      return;
+    }
+
+    if (!activeExternalWallet) {
+      openWalletPicker(selectedExternalChain);
+      return;
+    }
+
+    setState({
+      status: "success",
+      message: `Bridge preview ready: ${amount} ${selectedToken.symbol} from ${getBridgeEndpointLabel(
+        sourceEndpoint,
+        preferredNetwork,
+      )} to ${getBridgeEndpointLabel(
+        destinationEndpoint,
+        preferredNetwork,
+      )} using ${activeExternalWallet.walletName}.`,
+    });
+  }
+
+  const sourceWalletLabel =
+    sourceEndpoint === "starknet"
+      ? starknetAddress
+        ? shortHash(starknetAddress)
+        : "No Starknet wallet linked"
+      : activeExternalWallet
+        ? `${activeExternalWallet.walletName} · ${shortHash(activeExternalWallet.address)}`
+        : "Connect wallet";
+  const destinationWalletLabel =
+    destinationEndpoint === "starknet"
+      ? starknetAddress
+        ? shortHash(starknetAddress)
+        : "No Starknet wallet linked"
+      : activeExternalWallet
+        ? `${activeExternalWallet.walletName} · ${shortHash(activeExternalWallet.address)}`
+        : "Connect wallet";
 
   return (
     <>
@@ -1771,142 +2056,360 @@ function BridgePanel({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="[font-family:var(--font-syne)] text-[28px] font-semibold leading-none">
-              StarkZap Bridge Routes
+              Bridge
             </p>
             <p className="mt-2 text-[14px] text-[#c7cee2]">
-              Supported external chains are discovered from the installed StarkZap
-              bridge package for {preferredNetwork}.
+              Move assets between Starknet and one external chain at a time with a simple two-sided bridge form.
             </p>
           </div>
           <span className="rounded-full bg-[#14245b] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7ea1ff]">
-            {hasConnectedWallet ? "External wallet connected" : "Wallet connection required"}
+            {preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia / Devnet"}
           </span>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_180px]">
+          <button
+            type="button"
+            onClick={() => setSelectedExternalChain("ethereum")}
+            className={`rounded-[14px] border px-4 py-4 text-left ${
+              selectedExternalChain === "ethereum"
+                ? "border-[#4f6fff] bg-[#15245d] text-white"
+                : "border-[#38405e] bg-[#161b2b] text-[#c7cee2]"
+            }`}
+          >
+            <p className="text-[14px] font-semibold">Ethereum</p>
+            <p className="mt-1 text-[12px] text-[#9fb1dd]">Bridge in or out with ETH, USDC, and USDT.</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedExternalChain("solana")}
+            className={`rounded-[14px] border px-4 py-4 text-left ${
+              selectedExternalChain === "solana"
+                ? "border-[#4f6fff] bg-[#15245d] text-white"
+                : "border-[#38405e] bg-[#161b2b] text-[#c7cee2]"
+            }`}
+          >
+            <p className="text-[14px] font-semibold">Solana</p>
+            <p className="mt-1 text-[12px] text-[#9fb1dd]">Bridge in or out with SOL, USDC, and USDT.</p>
+          </button>
+          <div className="rounded-[14px] border border-dashed border-[#4c5162] bg-[#121621] px-4 py-4 text-left">
+            <p className="text-[14px] font-semibold text-white">Bitcoin</p>
+            <p className="mt-1 text-[12px] text-[#9aa5be]">Coming soon.</p>
+          </div>
         </div>
 
         {loading ? (
           <div className="mt-5 rounded-[14px] border border-[#38405e] bg-[#0d1220] px-4 py-4 text-[13px] text-[#b8c2dc]">
-            Loading supported bridge routes...
+            Loading bridge routes...
           </div>
         ) : null}
 
-        {bridgeData ? (
+        {bridgeData && bridgeTokens.length > 0 ? (
           <>
             <div className="mt-5 rounded-[14px] border border-[#38405e] bg-[#0d1220] px-4 py-4">
               <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9eabca]">
-                Installed Connector Support
+                Bridge Flow
               </p>
               <p className="mt-3 text-[14px] leading-6 text-[#c7cee2]">
                 {bridgeData.note}
               </p>
+            </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {bridgeData.supportedChains.map((chain) => (
-                    <span
-                      key={chain}
-                    className="rounded-full bg-[#16204e] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9fb1ff]"
-                    >
-                      {chain}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <BridgeConnectorCard
-                  actionLabel={connecting === "ethereum" ? "Connecting..." : ethereumWallet ? "Connected" : "Connect"}
-                  connectedAddress={ethereumWallet?.address ?? null}
-                networkLabel={ethereumWallet?.networkLabel ?? "EVM connector"}
-                onClick={handleConnectEthereum}
-                title="Ethereum Wallet"
+            <div className="mt-5 space-y-3">
+              <BridgeFlowCard
+                actionLabel={
+                  sourceEndpoint === "starknet"
+                    ? undefined
+                    : activeExternalWallet
+                      ? "Switch wallet"
+                      : "Connect wallet"
+                }
+                amount={amount}
+                editableAmount
+                endpointLabel={getBridgeEndpointLabel(sourceEndpoint, preferredNetwork)}
+                onAction={
+                  sourceEndpoint === "starknet"
+                    ? undefined
+                    : () => openWalletPicker(selectedExternalChain)
+                }
+                onAmountChange={setAmount}
+                onSelectToken={(symbol) => {
+                  setSelectedSymbols((current) => ({
+                    ...current,
+                    [selectedExternalChain]: symbol,
+                  }));
+                }}
+                selectedToken={selectedToken}
+                title="From"
+                tokenOptions={bridgeTokens}
+                walletLabel={sourceWalletLabel}
               />
-              <BridgeConnectorCard
-                actionLabel={connecting === "solana" ? "Connecting..." : solanaWallet ? "Connected" : "Connect"}
-                connectedAddress={solanaWallet?.address ?? null}
-                networkLabel={solanaWallet?.networkLabel ?? "Solana connector"}
-                  onClick={handleConnectSolana}
-                  title="Solana Wallet"
-                />
+
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setDirection((current) => (current === "into_starknet" ? "out_of_starknet" : "into_starknet"))}
+                  className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-[#45507a] bg-[#11172a] text-[#9fb1ff]"
+                >
+                  <SwapIcon />
+                </button>
               </div>
 
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              {bridgeData.tokens.slice(0, 6).map((token) => (
-                <div
-                  key={`${token.chain}:${token.id}`}
-                  className="rounded-[16px] border border-[#38405e] bg-[#161b2b] p-4"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[14px] font-semibold text-white">
-                      {token.symbol}
-                    </p>
-                    <span className="rounded-full bg-[#14245b] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7ea1ff]">
-                      {token.chain}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-[12px] text-[#b8c2dc]">
-                    {token.name}
-                  </p>
-                  <p className="mt-3 text-[12px] text-[#8f98ad]">
-                    Protocol: {token.protocol}
-                  </p>
-                  <p className="mt-1 text-[12px] text-[#8f98ad]">
-                    Starknet asset: {shortHash(token.starknetAddress)}
-                  </p>
-                </div>
-              ))}
+              <BridgeFlowCard
+                actionLabel={
+                  destinationEndpoint === "starknet"
+                    ? undefined
+                    : activeExternalWallet
+                      ? "Switch wallet"
+                      : "Connect wallet"
+                }
+                amount={amount}
+                endpointLabel={getBridgeEndpointLabel(destinationEndpoint, preferredNetwork)}
+                onAction={
+                  destinationEndpoint === "starknet"
+                    ? undefined
+                    : () => openWalletPicker(selectedExternalChain)
+                }
+                selectedToken={selectedToken}
+                title="To"
+                tokenOptions={bridgeTokens}
+                walletLabel={destinationWalletLabel}
+              />
             </div>
           </>
         ) : null}
 
-        <InlineState state={state} />
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <BridgeQuickStat
+            label="Route"
+            value={`${selectedExternalChain === "ethereum" ? "Ethereum" : "Solana"} ↔ Starknet`}
+          />
+          <BridgeQuickStat
+            label="Assets"
+            value={bridgeTokens.map((token) => token.symbol).join(" · ") || "Loading"}
+          />
+          <BridgeQuickStat
+            label="Wallet"
+            value={activeExternalWallet?.walletName ?? "Not connected"}
+          />
+        </div>
+
+        <div className="mt-5">
+          <InlineState state={state} />
+        </div>
       </div>
 
       <PanelFooter
-        left="Source-chain gas still applies on the external wallet side"
-        right="External wallet connection is live for Ethereum and Solana. Deposit execution still needs the client-side StarkZap bridge flow."
-        buttonLabel={hasConnectedWallet ? "Bridge execution shell connected" : "Connect an external wallet above"}
-        buttonDisabled
+        left="Source-chain gas still applies on Ethereum and Solana."
+        right="Wallet selection is live. Use the bridge form above to choose chain, token, and direction."
+        buttonDisabled={loading || !selectedToken}
+        buttonLabel={
+          activeExternalWallet
+            ? "Review Bridge"
+            : `Connect ${selectedExternalChain === "ethereum" ? "Ethereum" : "Solana"} wallet`
+        }
+        onClick={handleReviewBridge}
+      />
+      <BridgeWalletPickerDialog
+        connecting={connecting}
+        onClose={() => {
+          if (!connecting) {
+            setWalletPicker(null);
+          }
+        }}
+        onSelect={handleConnectWallet}
+        pickerState={walletPicker}
       />
     </>
   );
 }
 
-function BridgeConnectorCard({
+function BridgeFlowCard({
   actionLabel,
-  connectedAddress,
-  networkLabel,
-  onClick,
+  amount,
+  editableAmount,
+  endpointLabel,
+  onAction,
+  onAmountChange,
+  onSelectToken,
+  selectedToken,
   title,
+  tokenOptions,
+  walletLabel,
 }: {
-  actionLabel: string;
-  connectedAddress: string | null;
-  networkLabel: string;
-  onClick: () => void;
+  actionLabel?: string;
+  amount: string;
+  editableAmount?: boolean;
+  endpointLabel: string;
+  onAction?: () => void;
+  onAmountChange?: (value: string) => void;
+  onSelectToken?: (symbol: string) => void;
+  selectedToken: BridgeDisplayToken | null;
   title: string;
+  tokenOptions: BridgeDisplayToken[];
+  walletLabel: string;
 }) {
   return (
     <div className="rounded-[16px] border border-[#38405e] bg-[#161b2b] p-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[14px] font-semibold text-white">{title}</p>
-        <span className="rounded-full bg-[#14245b] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7ea1ff]">
-          {connectedAddress ? "Connected" : "Ready"}
-        </span>
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9eabca]">
+            {title}
+          </p>
+          <p className="mt-2 text-[16px] font-semibold text-white">{endpointLabel}</p>
+        </div>
+        {actionLabel ? (
+          <button
+            type="button"
+            onClick={onAction}
+            className="rounded-[10px] border border-[#45507a] px-3 py-2 text-[12px] font-semibold text-white"
+          >
+            {actionLabel}
+          </button>
+        ) : (
+          <span className="rounded-full bg-[#14245b] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7ea1ff]">
+            Starknet
+          </span>
+        )}
       </div>
-      <p className="mt-2 text-[12px] text-[#b8c2dc]">{networkLabel}</p>
-      <p className="mt-2 text-[12px] text-[#8f98ad]">
-        {connectedAddress ? shortHash(connectedAddress) : "No external wallet connected yet."}
+
+      <p className="mt-3 text-[12px] text-[#8f98ad]">{walletLabel}</p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {tokenOptions.map((token) => (
+          <button
+            key={`${title}:${token.chain}:${token.symbol}`}
+            type="button"
+            onClick={() => onSelectToken?.(token.symbol)}
+            disabled={!onSelectToken}
+            className={`rounded-full px-3 py-2 text-[11px] font-semibold ${
+              selectedToken?.symbol === token.symbol
+                ? "bg-[#3151ff] text-white"
+                : "bg-[#0f1422] text-[#b9c3df]"
+            } disabled:cursor-default`}
+          >
+            {token.symbol}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 rounded-[14px] border border-[#2b334d] bg-[#0f1422] px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
+              Amount
+            </p>
+            {editableAmount ? (
+              <input
+                inputMode="decimal"
+                value={amount}
+                onChange={(event) => onAmountChange?.(event.target.value)}
+                placeholder="0.0"
+                className="mt-3 w-full bg-transparent text-[28px] font-semibold text-white outline-none placeholder:text-[#677086]"
+              />
+            ) : (
+              <p className="mt-3 text-[28px] font-semibold text-white">
+                {amount.trim() || "0.0"}
+              </p>
+            )}
+          </div>
+          <div className="rounded-[12px] border border-[#394465] bg-[#171e30] px-3 py-3 text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
+              Asset
+            </p>
+            <p className="mt-2 text-[16px] font-semibold text-white">
+              {selectedToken?.symbol ?? "—"}
+            </p>
+          </div>
+        </div>
+
+        <p className="mt-3 text-[12px] text-[#8f98ad]">
+          {selectedToken
+            ? `${selectedToken.name} via ${selectedToken.protocol}`
+            : "No route asset available."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function BridgeWalletPickerDialog({
+  connecting,
+  onClose,
+  onSelect,
+  pickerState,
+}: {
+  connecting: BridgeExternalChain | null;
+  onClose: () => void;
+  onSelect: (option: BridgeWalletOption) => Promise<void>;
+  pickerState: BridgeWalletPickerState;
+}) {
+  if (!pickerState) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="w-full max-w-[420px] rounded-[18px] border border-[#31384c] bg-[#111722] p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
+              Select Wallet
+            </p>
+            <p className="mt-2 text-[18px] font-semibold text-white">
+              {pickerState.chain === "ethereum" ? "Ethereum" : "Solana"} wallets
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[12px] font-semibold text-[#9fb1ff]"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {pickerState.options.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => {
+                void onSelect(option);
+              }}
+              disabled={connecting === option.chain}
+              className="flex w-full items-center justify-between rounded-[14px] border border-[#2d3548] bg-[#171e2c] px-4 py-4 text-left text-white disabled:opacity-60"
+            >
+              <div>
+                <p className="text-[14px] font-semibold">{option.name}</p>
+                <p className="mt-1 text-[12px] text-[#8f98ad]">
+                  {option.chain === "ethereum" ? "EVM wallet" : "Solana wallet"}
+                </p>
+              </div>
+              <span className="rounded-full bg-[#14245b] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7ea1ff]">
+                {connecting === option.chain ? "Connecting..." : "Select"}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BridgeQuickStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[14px] border border-[#38405e] bg-[#161b2b] px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8f99af]">
+        {label}
       </p>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={actionLabel === "Connecting..." || actionLabel === "Connected"}
-        className={`mt-4 h-11 w-full rounded-[12px] text-[13px] font-semibold ${
-          actionLabel === "Connected"
-            ? "bg-[#14331f] text-[#7ce19c]"
-            : "bg-[#13255f] text-white"
-        } disabled:opacity-70`}
-      >
-        {actionLabel}
-      </button>
+      <p className="mt-2 text-[14px] font-semibold text-white">{value}</p>
     </div>
   );
 }
@@ -1915,12 +2418,14 @@ function PanelFooter({
   buttonDisabled,
   buttonLabel,
   left,
+  onClick,
   right,
 }: {
   left: string;
   right: string;
   buttonLabel: string;
   buttonDisabled?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <>
@@ -1931,6 +2436,7 @@ function PanelFooter({
 
       <button
         type="button"
+        onClick={onClick}
         disabled={buttonDisabled}
         className={`mt-4 h-12 w-full rounded-[12px] text-[15px] font-semibold ${
           buttonDisabled
@@ -1968,17 +2474,16 @@ function SideRailCard({
     return (
       <section className="rounded-[20px] border border-[#272c35] bg-[#1f232b] px-5 py-5">
         <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9aa2b6]">
-          Bridge Status
+          Bridge Rail
         </p>
-        <div className="mt-4 space-y-3">
-          <BridgeStatusRow
-            label="Ethereum Connector"
-            value="Connect in panel"
-          />
-          <BridgeStatusRow
-            label="Solana Connector"
-            value="Connect in panel"
-          />
+        <h3 className="mt-4 [font-family:var(--font-syne)] text-[30px] font-semibold leading-none text-white">
+          External Bridge
+        </h3>
+        <p className="mt-3 text-[14px] leading-6 text-[#c7cee2]">
+          Use one external chain at a time, flip direction with the center arrow, and keep the token set limited to the core bridge assets.
+        </p>
+        <div className="mt-6 rounded-[14px] border border-white/10 bg-black/25 px-4 py-4 text-[13px] leading-6 text-[#d6dbeb]">
+          Ethereum and Solana are active in the panel. Bitcoin is marked coming soon.
         </div>
       </section>
     );
@@ -2035,11 +2540,11 @@ function RecentActivityCard({ currentTab }: { currentTab: MoveMode }) {
             "AVNU quote acceptance is tracked per execution",
             "Sponsored Starknet swaps are surfaced after confirmation",
           ]
-          : [
-              "Installed routes are limited to Ethereum and Solana connectors",
-              "Source-chain approvals and deposits must complete in the external wallet",
-              "Bridge execution history appears after a live external deposit",
-            ];
+        : [
+            "Ethereum and Solana bridge activity will appear here after live execution lands.",
+            "Wallet selection stays separate for the source external chain.",
+            "Bitcoin bridge stays hidden until the route is ready.",
+          ];
 
   return (
     <section className="rounded-[20px] border border-[#272c35] bg-[#1f232b] px-5 py-5">
@@ -2087,7 +2592,20 @@ function HelpCard({ currentTab }: { currentTab: MoveMode }) {
               body: "Swap execution stays on Starknet and aims for zero gas fee when the sponsor policy is active.",
             },
           ]
-        : helpItems;
+        : [
+            {
+              title: "How bridge direction works",
+              body: "Use the center arrow to flip between external-to-Starknet and Starknet-to-external flow without changing the selected chain.",
+            },
+            {
+              title: "Supported assets",
+              body: "Ethereum exposes ETH, USDC, and USDT. Solana exposes SOL, USDC, and USDT. Bitcoin remains coming soon in this build.",
+            },
+            {
+              title: "Wallet selection",
+              body: "External wallets are chosen inside the bridge form so you can switch between multiple detected EVM or Solana wallets before bridging.",
+            },
+          ];
 
   return (
     <section className="rounded-[20px] border border-[#272c35] bg-[#1f232b] px-5 py-5">

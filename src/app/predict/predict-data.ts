@@ -6,12 +6,12 @@ export const predictSteps = [
   },
   {
     number: "2",
-    title: "Save Your Position",
-    body: "Record a YES or NO position with the current oracle-linked price so the hedge appears instantly in your StarkFlow history.",
+    title: "Submit The Bet",
+    body: "Submit a YES or NO position into the live USDC escrow so the bet hash and price snapshot are recorded together.",
   },
   {
     number: "3",
     title: "Track The Market",
-    body: "Follow the market state, price source, and your saved hedges while the broader execution rail matures.",
+    body: "Follow the market state, price source, and your open positions from the Predict and Me views after the bet lands.",
   },
 ] as const;

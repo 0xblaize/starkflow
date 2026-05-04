@@ -1,12 +1,18 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useAuthorizationSignature } from "@privy-io/react-auth";
+import { CallData, cairo, shortString } from "starknet";
 import { TopbarAppShell } from "@/components/app-shell/shell";
+import { getMoveExecutionClient } from "@/lib/move-wallet-client";
 import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
+import { getPredictEscrowConfig } from "@/lib/predict-escrow-config";
 import { predictSteps } from "./predict-data";
 
 type PredictViewProps = {
   getAccessToken: () => Promise<string | null>;
+  identityToken: string | null;
   preferredNetwork: "mainnet" | "sepolia";
   signOutAction: () => Promise<void>;
   user: {
@@ -28,6 +34,7 @@ type PredictMarket = {
   description: string;
   id: string;
   noProbability: number;
+  onchainMarketId: string;
   priceSource: string;
   sourceUpdatedAt: string | null;
   state: string;
@@ -43,15 +50,19 @@ type PredictMarket = {
 type PredictSavedBet = {
   createdAt: string;
   currentPrice: string | null;
+  entryProbabilityBps: number | null;
+  executionMode: string;
   id: string;
   marketCategory: string;
   marketId: string;
   marketTitle: string;
+  onchainMarketId: string | null;
   outcome: "YES" | "NO";
   stakeAmount: string;
   stakeCurrency: string;
   status: string;
   targetPrice: string;
+  txHash: string | null;
 };
 
 type PredictSummary = {
@@ -67,7 +78,7 @@ type PredictMarketsPayload = {
   markets: PredictMarket[];
   myBets: PredictSavedBet[];
   network: "mainnet" | "sepolia";
-  sessionKeySupported: boolean;
+  onchainExecutionLive: boolean;
   summary: PredictSummary;
 };
 
@@ -80,6 +91,7 @@ const stakeChoices = ["1", "5", "10"] as const;
 
 async function fetchPredictJson<T>(
   getAccessToken: () => Promise<string | null>,
+  identityToken: string | null,
   input: string,
   init?: RequestInit,
 ) {
@@ -96,19 +108,30 @@ async function fetchPredictJson<T>(
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
       Authorization: `Bearer ${token}`,
+      ...(identityToken ? { "x-privy-identity-token": identityToken } : {}),
     },
   });
+  const rawBody = await response.text();
+  const payload = (() => {
+    if (!rawBody) {
+      return null;
+    }
 
-  const payload = (await response.json().catch(() => null)) as
-    | T
-    | { error?: string }
-    | null;
+    try {
+      return JSON.parse(rawBody) as T | { error?: string };
+    } catch {
+      return null;
+    }
+  })();
 
   if (!response.ok) {
-    throw new Error(
+    const detail =
       typeof payload === "object" && payload && "error" in payload && payload.error
         ? payload.error
-        : `Request failed with status ${response.status}`,
+        : rawBody?.trim() || "No error body returned.";
+
+    throw new Error(
+      `${input} failed with status ${response.status}: ${detail}`,
     );
   }
 
@@ -117,6 +140,33 @@ async function fetchPredictJson<T>(
 
 function shortStakeDisplay(stakeAmount: string, currency: string) {
   return `${stakeAmount} ${currency}`;
+}
+
+function shortHash(value: string) {
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function parseUsdcAmountToRaw(value: string) {
+  const normalized = value.trim();
+
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    throw new Error("Enter a valid USDC stake amount.");
+  }
+
+  const [wholePart, fractionalPart = ""] = normalized.split(".");
+  if (fractionalPart.length > 6) {
+    throw new Error("USDC stake supports up to 6 decimal places.");
+  }
+
+  const whole = BigInt(wholePart || "0");
+  const fraction = BigInt((fractionalPart + "000000").slice(0, 6));
+  const raw = whole * BigInt(1_000_000) + fraction;
+
+  if (raw <= BigInt(0)) {
+    throw new Error("Enter a valid USDC stake amount.");
+  }
+
+  return raw;
 }
 
 function shortTimestamp(isoValue: string) {
@@ -140,16 +190,19 @@ function shortTimestamp(isoValue: string) {
 
 export function PredictView({
   getAccessToken,
+  identityToken,
   preferredNetwork,
   signOutAction,
   user,
 }: PredictViewProps) {
+  const searchParams = useSearchParams();
+  const { generateAuthorizationSignature } = useAuthorizationSignature();
   const [feed, setFeed] = useState<PredictFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [markets, setMarkets] = useState<PredictMarket[]>([]);
   const [myBets, setMyBets] = useState<PredictSavedBet[]>([]);
   const [placingKey, setPlacingKey] = useState<string | null>(null);
-  const [sessionKeySupported, setSessionKeySupported] = useState(false);
+  const [onchainExecutionLive, setOnchainExecutionLive] = useState(false);
   const [stakeByMarket, setStakeByMarket] = useState<Record<string, string>>({});
   const [state, setState] = useState<SubmitState>(null);
   const [summary, setSummary] = useState<PredictSummary>({
@@ -166,13 +219,14 @@ export function PredictView({
     try {
       const payload = await fetchPredictJson<PredictMarketsPayload>(
         getAccessToken,
+        identityToken,
         "/api/predict/markets",
       );
 
       setFeed(payload.feed);
       setMarkets(payload.markets);
       setMyBets(payload.myBets);
-      setSessionKeySupported(payload.sessionKeySupported);
+      setOnchainExecutionLive(payload.onchainExecutionLive);
       setSummary(payload.summary);
       setStakeByMarket((current) => {
         const next = { ...current };
@@ -200,7 +254,7 @@ export function PredictView({
 
   useEffect(() => {
     void loadPredictState();
-  }, [getAccessToken, preferredNetwork]);
+  }, [getAccessToken, identityToken, preferredNetwork]);
 
   async function handlePlaceBet(market: PredictMarket, outcome: "YES" | "NO") {
     const stakeAmount = stakeByMarket[market.id] ?? "5";
@@ -209,9 +263,81 @@ export function PredictView({
     setState(null);
 
     try {
+      if (onchainExecutionLive) {
+        const escrowConfig = getPredictEscrowConfig();
+
+        if (!escrowConfig) {
+          throw new Error("Predict escrow is not configured in this build.");
+        }
+
+        const rawStakeAmount = parseUsdcAmountToRaw(stakeAmount);
+        const execution = await getMoveExecutionClient({
+          generateAuthorizationSignature,
+          getAccessToken,
+          identityToken,
+          preferredNetwork,
+        });
+
+        await execution.wallet.ensureReady({
+          deploy: "if_needed",
+          ...(execution.session.sponsoredExecution
+            ? { feeMode: "sponsored" as const }
+            : {}),
+        });
+
+        const tx = await execution.wallet.execute(
+          [
+            {
+              contractAddress: escrowConfig.collateralTokenAddress,
+              entrypoint: "approve",
+              calldata: CallData.compile({
+                spender: escrowConfig.address,
+                amount: cairo.uint256(rawStakeAmount),
+              }),
+            },
+            {
+              contractAddress: escrowConfig.address,
+              entrypoint: "place_bet",
+              calldata: CallData.compile({
+                market_id: shortString.encodeShortString(market.onchainMarketId),
+                side: outcome === "YES" ? 1 : 2,
+                amount: cairo.uint256(rawStakeAmount),
+              }),
+            },
+          ],
+          execution.session.sponsoredExecution
+            ? { feeMode: "sponsored" as const }
+            : undefined,
+        );
+
+        const payload = await fetchPredictJson<{
+          message: string;
+        }>(getAccessToken, identityToken, "/api/predict/bets", {
+          method: "POST",
+          body: JSON.stringify({
+            currentProbabilityBps:
+              (outcome === "YES" ? market.yesProbability : market.noProbability) * 100,
+            escrowAddress: escrowConfig.address,
+            executionMode: "ONCHAIN",
+            marketId: market.id,
+            onchainMarketId: market.onchainMarketId,
+            outcome,
+            stakeAmount,
+            txHash: tx.hash,
+          }),
+        });
+
+        await loadPredictState();
+        setState({
+          status: "success",
+          message: `${payload.message} Tx ${shortHash(tx.hash)}.`,
+        });
+        return;
+      }
+
       const payload = await fetchPredictJson<{
         message: string;
-      }>(getAccessToken, "/api/predict/bets", {
+      }>(getAccessToken, identityToken, "/api/predict/bets", {
         method: "POST",
         body: JSON.stringify({
           marketId: market.id,
@@ -231,7 +357,7 @@ export function PredictView({
         error:
           error instanceof Error
             ? error.message
-            : "Failed to save prediction bet.",
+            : "Failed to submit prediction bet.",
       });
     } finally {
       setPlacingKey(null);
@@ -245,6 +371,25 @@ export function PredictView({
 
     return summary.priceSources.join(" + ");
   }, [summary.priceSources]);
+
+  const orderedMarkets = useMemo(() => {
+    const selectedMarketId = searchParams.get("market");
+
+    if (!selectedMarketId) {
+      return markets;
+    }
+
+    const selectedMarket = markets.find((market) => market.id === selectedMarketId);
+
+    if (!selectedMarket) {
+      return markets;
+    }
+
+    return [
+      selectedMarket,
+      ...markets.filter((market) => market.id !== selectedMarketId),
+    ];
+  }, [markets, searchParams]);
 
   return (
     <TopbarAppShell
@@ -271,14 +416,14 @@ export function PredictView({
               Open Markets
             </h2>
             <p className="mt-1 hidden text-[14px] text-[#8e97ad] md:block">
-              Save readable YES / NO hedges with live price context and tracked positions.
+              Submit live YES / NO hedges into the Sepolia escrow and keep the tx record visible in your position history.
             </p>
           </div>
 
           <div className="hidden items-center gap-2 md:flex">
             <FilterPill>{preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia"}</FilterPill>
             <FilterPill>{sourceLabel}</FilterPill>
-            <FilterPill>{sessionKeySupported ? "Session rail live" : "Manual save"}</FilterPill>
+            <FilterPill>{onchainExecutionLive ? "Escrow live" : "Record only"}</FilterPill>
           </div>
 
           <button
@@ -299,7 +444,7 @@ export function PredictView({
             ) : markets.length === 0 ? (
               <EmptyPanel label="No prediction markets are available right now." />
             ) : (
-              markets.map((market) => (
+              orderedMarkets.map((market) => (
                 <MarketCard
                   key={market.id}
                   market={market}
@@ -322,14 +467,14 @@ export function PredictView({
             <MyHedgesCard bets={myBets} />
             <GlobalFeedCard items={feed} />
             <TransparencyCard
-              sessionKeySupported={sessionKeySupported}
+              onchainExecutionLive={onchainExecutionLive}
               sourceLabel={sourceLabel}
             />
           </div>
         </div>
       </section>
 
-      <MobileExecutionBar sessionKeySupported={sessionKeySupported} />
+      <MobileExecutionBar onchainExecutionLive={onchainExecutionLive} />
     </TopbarAppShell>
   );
 }
@@ -355,7 +500,7 @@ function DesktopHero({
           </h1>
 
           <p className="mt-4 max-w-[620px] text-[16px] leading-7 text-[#d7dcff]">
-            Save directional hedges with live price context and keep your StarkFlow prediction history readable while execution rails mature.
+            Put directional USDC hedges onchain, keep the tx hash visible, and monitor the position from Predict and Me.
           </p>
 
           <div className="mt-8 grid max-w-[460px] gap-7 sm:grid-cols-2">
@@ -647,14 +792,14 @@ function MyHedgesCard({ bets }: { bets: PredictSavedBet[] }) {
           <p className="text-[15px] font-semibold text-white">My Hedges</p>
         </div>
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8d96ac]">
-          Saved
+          Tracked
         </span>
       </div>
 
       <div className="mt-5 space-y-3">
         {bets.length === 0 ? (
           <p className="text-[12px] leading-6 text-[#9099ad]">
-            No saved prediction hedges yet. Choose a market and record your first YES or NO position.
+            No prediction hedges yet. Submit your first YES or NO position to start the book.
           </p>
         ) : (
           bets.slice(0, 6).map((bet) => (
@@ -668,7 +813,8 @@ function MyHedgesCard({ bets }: { bets: PredictSavedBet[] }) {
                     {bet.marketTitle}
                   </p>
                   <p className="mt-1 text-[12px] leading-5 text-[#9099ad]">
-                    {bet.outcome} with {shortStakeDisplay(bet.stakeAmount, bet.stakeCurrency)}
+                    {bet.outcome} with {shortStakeDisplay(bet.stakeAmount, bet.stakeCurrency)} -{" "}
+                    {bet.executionMode === "ONCHAIN" ? "Onchain escrow" : "Record only"}
                   </p>
                 </div>
                 <span
@@ -736,10 +882,10 @@ function GlobalFeedCard({ items }: { items: PredictFeedItem[] }) {
 }
 
 function TransparencyCard({
-  sessionKeySupported,
+  onchainExecutionLive,
   sourceLabel,
 }: {
-  sessionKeySupported: boolean;
+  onchainExecutionLive: boolean;
   sourceLabel: string;
 }) {
   return (
@@ -751,22 +897,22 @@ function TransparencyCard({
         Price feeds and bet records stay explicit
       </h3>
       <p className="mt-4 text-[14px] leading-7 text-[#97a0b5]">
-        Live prices are sourced from {sourceLabel}. Bet actions are saved to your StarkFlow profile history first. Session-key execution stays disabled until the installed wallet rail exposes a supported session authorization flow.
+        Live prices are sourced from {sourceLabel}. When escrow is live on Sepolia, StarkFlow submits the approval and bet transaction onchain, then stores the tx hash and price snapshot in your profile history.
       </p>
       <button
         type="button"
         className="mt-5 text-[13px] font-semibold text-[#3b5bff]"
       >
-        {sessionKeySupported ? "Session rail active" : "Session rail unavailable"}
+        {onchainExecutionLive ? "Sepolia escrow active" : "Record-only fallback active"}
       </button>
     </section>
   );
 }
 
 function MobileExecutionBar({
-  sessionKeySupported,
+  onchainExecutionLive,
 }: {
-  sessionKeySupported: boolean;
+  onchainExecutionLive: boolean;
 }) {
   return (
     <section className="mt-5 rounded-[18px] border border-[#1b2457] bg-[#101840] px-4 py-4 md:hidden">
@@ -776,12 +922,12 @@ function MobileExecutionBar({
         </span>
         <div>
           <p className="text-[14px] font-semibold text-[#9fb2ff]">
-            {sessionKeySupported ? "Execution rail enabled" : "Prediction saving live"}
+            {onchainExecutionLive ? "Escrow execution enabled" : "Prediction recording only"}
           </p>
           <p className="mt-1 text-[12px] leading-5 text-[#8697cf]">
-            {sessionKeySupported
-              ? "This wallet rail can auto-execute prediction actions."
-              : "Bets now save with live prices, but session-key auto-execution is not exposed by the current Starknet wallet stack."}
+            {onchainExecutionLive
+              ? "YES and NO bets route through the live Sepolia escrow and save the tx hash locally."
+              : "This build can still record the prediction locally if the live escrow is unavailable."}
           </p>
         </div>
       </div>

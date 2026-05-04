@@ -65,7 +65,7 @@ function DesktopBackground() {
 }
 
 function AuthPageInner() {
-  const { ready, authenticated, login, getAccessToken } = usePrivy();
+  const { ready, authenticated, login, getAccessToken, user } = usePrivy();
   const router = useRouter();
   const searchParams = useSearchParams();
   const launchStartedRef = useRef(false);
@@ -114,12 +114,22 @@ function AuthPageInner() {
           throw new Error("Privy access token was not ready");
         }
 
-        const response = await fetch("/api/profile", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6_500);
+        let response: Response;
+
+        try {
+          response = await fetch("/api/profile", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              ...(user?.id ? { "x-privy-user-id": user.id } : {}),
+            },
+            cache: "no-store",
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
 
         if (!response.ok) {
           const payload = (await response.json().catch(() => null)) as

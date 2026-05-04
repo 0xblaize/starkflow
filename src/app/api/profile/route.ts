@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyPrivyToken } from "@/lib/privy-server";
+import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { prisma } from "@/lib/prisma";
+import { withTimeout } from "@/lib/promise-timeout";
 
 function normalizeUsername(input: string) {
   return input
@@ -16,7 +17,11 @@ function normalizeUsername(input: string) {
 export async function GET(req: NextRequest) {
   try {
     const claims = await verifyPrivyToken(req);
-    const appUser = await getOrCreatePrivyUser(claims);
+    const appUser = await withTimeout(
+      getOrCreatePrivyUser(claims),
+      6_000,
+      "Profile lookup timed out.",
+    );
 
     return NextResponse.json({
       id: appUser.id,
@@ -31,11 +36,6 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("[/api/profile][GET]", err);
     const message = err instanceof Error ? err.message : "Failed to fetch profile.";
-    const status =
-      message.includes("Missing Privy auth token") ||
-      message.toLowerCase().includes("jwt")
-        ? 401
-        : 500;
     return NextResponse.json(
       {
         error: "Failed to fetch profile.",
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
           ? { details: message }
           : {}),
       },
-      { status },
+      { status: getPrivyErrorStatus(err) },
     );
   }
 }
@@ -51,7 +51,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const claims = await verifyPrivyToken(req);
-    const appUser = await getOrCreatePrivyUser(claims);
+    const appUser = await withTimeout(
+      getOrCreatePrivyUser(claims),
+      6_000,
+      "Profile lookup timed out.",
+    );
     const userId = appUser.id;
 
     const body: {
@@ -62,16 +66,20 @@ export async function POST(req: NextRequest) {
     } = await req.json();
 
     if (body.skip) {
-      await prisma.user.upsert({
-        where: { id: userId },
-        create: {
-          id: userId,
-          privyUserId: claims.sub,
-          preferredNetwork: "sepolia",
-          onboarded: true,
-        },
-        update: { onboarded: true },
-      });
+      await withTimeout(
+        prisma.user.upsert({
+          where: { id: userId },
+          create: {
+            id: userId,
+            privyUserId: claims.sub,
+            preferredNetwork: "sepolia",
+            onboarded: true,
+          },
+          update: { onboarded: true },
+        }),
+        6_000,
+        "Profile save timed out.",
+      );
       return NextResponse.json({ ok: true });
     }
 
@@ -89,41 +97,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Username must be under 24 characters." }, { status: 400 });
     }
 
-    const taken = await prisma.user.findFirst({
-      where: { username, NOT: { id: userId } },
-      select: { id: true },
-    });
+    const taken = await withTimeout(
+      prisma.user.findUnique({
+        where: { username },
+        select: { id: true },
+      }),
+      6_000,
+      "Username check timed out.",
+    );
     if (taken) {
-      return NextResponse.json({ error: "That username is already taken." }, { status: 400 });
+      if (taken.id !== userId) {
+        return NextResponse.json({ error: "That username is already taken." }, { status: 400 });
+      }
     }
 
-    await prisma.user.upsert({
-      where: { id: userId },
-      create: {
-        id: userId,
-        privyUserId: claims.sub,
-        username,
-        preferredNetwork,
-        ...(imageData !== undefined ? { image: imageData || null } : {}),
-        onboarded: true,
-      },
-      update: {
-        username,
-        preferredNetwork,
-        ...(imageData !== undefined ? { image: imageData || null } : {}),
-        onboarded: true,
-      },
-    });
+    await withTimeout(
+      prisma.user.upsert({
+        where: { id: userId },
+        create: {
+          id: userId,
+          privyUserId: claims.sub,
+          username,
+          preferredNetwork,
+          ...(imageData !== undefined ? { image: imageData || null } : {}),
+          onboarded: true,
+        },
+        update: {
+          username,
+          preferredNetwork,
+          ...(imageData !== undefined ? { image: imageData || null } : {}),
+          onboarded: true,
+        },
+      }),
+      6_000,
+      "Profile save timed out.",
+    );
 
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[/api/profile]", err);
     const message = err instanceof Error ? err.message : "Failed to save profile.";
-    const status =
-      message.includes("Missing Privy auth token") ||
-      message.toLowerCase().includes("jwt")
-        ? 401
-        : 500;
     return NextResponse.json(
       {
         error: "Failed to save profile.",
@@ -131,7 +144,7 @@ export async function POST(req: NextRequest) {
           ? { details: message }
           : {}),
       },
-      { status },
+      { status: getPrivyErrorStatus(err) },
     );
   }
 }

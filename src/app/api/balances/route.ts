@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { normalizePreferredNetwork } from "@/lib/app-user";
+import { withTimeout } from "@/lib/promise-timeout";
 import { verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { getReadOnlyWalletBalances } from "@/lib/starknet-read";
@@ -11,9 +12,13 @@ export async function GET(req: NextRequest) {
     const requestedNetwork = searchParams.get("network");
 
     if (address) {
-      const balances = await getReadOnlyWalletBalances(
-        address,
-        normalizePreferredNetwork(requestedNetwork),
+      const balances = await withTimeout(
+        getReadOnlyWalletBalances(
+          address,
+          normalizePreferredNetwork(requestedNetwork),
+        ),
+        6_000,
+        "Balance fetch timed out.",
       );
 
       return NextResponse.json(balances, {
@@ -24,7 +29,11 @@ export async function GET(req: NextRequest) {
     }
 
     const claims = await verifyPrivyToken(req);
-    const appUser = await getOrCreatePrivyUser(claims);
+    const appUser = await withTimeout(
+      getOrCreatePrivyUser(claims),
+      6_000,
+      "Profile lookup timed out.",
+    );
 
     if (!appUser.starknetAddress) {
       return NextResponse.json(
@@ -47,9 +56,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const balances = await getReadOnlyWalletBalances(
-      appUser.starknetAddress,
-      appUser.preferredNetwork,
+    const balances = await withTimeout(
+      getReadOnlyWalletBalances(
+        appUser.starknetAddress,
+        appUser.preferredNetwork,
+      ),
+      6_000,
+      "Balance fetch timed out.",
     );
 
     return NextResponse.json(

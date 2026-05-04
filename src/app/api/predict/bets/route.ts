@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  buildPredictMarketView,
   formatUsd,
   getPredictMarketDefinition,
   type PredictOutcome,
@@ -10,9 +11,14 @@ import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 
 type CreatePredictionBetBody = {
+  currentProbabilityBps?: number;
+  escrowAddress?: string;
+  executionMode?: "OFFCHAIN" | "ONCHAIN";
   marketId?: string;
+  onchainMarketId?: string;
   outcome?: PredictOutcome;
   stakeAmount?: string;
+  txHash?: string;
 };
 
 function normalizeStakeAmount(raw: string | undefined) {
@@ -39,15 +45,19 @@ export async function GET(req: NextRequest) {
       bets: bets.map((bet) => ({
         createdAt: bet.createdAt.toISOString(),
         currentPrice: bet.currentPrice,
+        entryProbabilityBps: bet.entryProbabilityBps,
+        executionMode: bet.executionMode,
         id: bet.id,
         marketCategory: bet.marketCategory,
         marketId: bet.marketId,
         marketTitle: bet.marketTitle,
+        onchainMarketId: bet.onchainMarketId,
         outcome: bet.outcome,
         stakeAmount: bet.stakeAmount,
         stakeCurrency: bet.stakeCurrency,
         status: bet.status,
         targetPrice: bet.targetPrice,
+        txHash: bet.txHash,
       })),
     });
   } catch (error) {
@@ -71,10 +81,25 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as CreatePredictionBetBody;
     const marketId = body.marketId?.trim() ?? "";
     const outcome = body.outcome === "NO" ? "NO" : body.outcome === "YES" ? "YES" : null;
+    const executionMode = body.executionMode === "ONCHAIN" ? "ONCHAIN" : "OFFCHAIN";
+    const txHash = body.txHash?.trim() ?? null;
+    const onchainMarketId = body.onchainMarketId?.trim() ?? null;
+    const escrowAddress = body.escrowAddress?.trim() ?? null;
+    const currentProbabilityBps =
+      body.currentProbabilityBps != null && Number.isInteger(body.currentProbabilityBps)
+        ? body.currentProbabilityBps
+        : null;
 
     if (!marketId || !outcome) {
       return NextResponse.json(
         { error: "Choose a market and a valid outcome." },
+        { status: 400 },
+      );
+    }
+
+    if (executionMode === "ONCHAIN" && (!txHash || !onchainMarketId || !escrowAddress)) {
+      return NextResponse.json(
+        { error: "Onchain prediction records require a tx hash, market id, and escrow address." },
         { status: 400 },
       );
     }
@@ -90,7 +115,8 @@ export async function POST(req: NextRequest) {
     }
 
     const prices = await getLatestPredictPrices([market.baseAsset]);
-    const currentPrice = prices[market.baseAsset]?.priceUsd ?? null;
+    const snapshot = prices[market.baseAsset] ?? null;
+    const currentPrice = snapshot?.priceUsd ?? null;
 
     if (currentPrice == null) {
       return NextResponse.json(
@@ -99,20 +125,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const marketView = buildPredictMarketView(market, snapshot);
+
     const bet = await prisma.predictionBet.create({
       data: {
         baseAsset: market.baseAsset,
         currentPrice: currentPrice.toFixed(8),
+        entryProbabilityBps: currentProbabilityBps,
+        escrowAddress,
+        executionMode,
         marketCategory: market.category,
         marketId: market.id,
-        marketTitle: market.title,
+        marketTitle: marketView.title,
         network: user.preferredNetwork,
+        onchainMarketId,
         outcome,
         quoteAsset: "USD",
         stakeAmount: stakeAmount.toFixed(2),
         stakeCurrency: "USDC",
         status: "OPEN",
-        targetPrice: market.targetPriceUsd.toFixed(8),
+        targetPrice: marketView.targetPriceUsd.toFixed(8),
+        txHash,
         userId: user.id,
       },
     });
@@ -121,10 +154,13 @@ export async function POST(req: NextRequest) {
       bet: {
         createdAt: bet.createdAt.toISOString(),
         currentPrice: formatUsd(currentPrice, currentPrice < 10 ? 4 : 2),
+        entryProbabilityBps: bet.entryProbabilityBps,
+        executionMode: bet.executionMode,
         id: bet.id,
         marketCategory: bet.marketCategory,
         marketId: bet.marketId,
         marketTitle: bet.marketTitle,
+        onchainMarketId: bet.onchainMarketId,
         outcome: bet.outcome,
         stakeAmount: bet.stakeAmount,
         stakeCurrency: bet.stakeCurrency,
@@ -133,8 +169,12 @@ export async function POST(req: NextRequest) {
           Number(bet.targetPrice),
           Number(bet.targetPrice) < 10 ? 3 : 2,
         ),
+        txHash: bet.txHash,
       },
-      message: `${bet.outcome} saved with a ${bet.stakeAmount} ${bet.stakeCurrency} hedge.`,
+      message:
+        executionMode === "ONCHAIN"
+          ? `${bet.outcome} submitted onchain with ${bet.stakeAmount} ${bet.stakeCurrency}.`
+          : `${bet.outcome} saved with a ${bet.stakeAmount} ${bet.stakeCurrency} hedge.`,
       priceSource: prices[market.baseAsset]?.source ?? "Unavailable",
     });
   } catch (error) {

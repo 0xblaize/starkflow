@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { normalizePreferredNetwork } from "@/lib/app-user";
 import { prisma } from "@/lib/prisma";
+import { withTimeout } from "@/lib/promise-timeout";
 import { getRecentWalletActivity } from "@/lib/starknet-read";
 
 function normalizeAddress(value: string) {
@@ -28,7 +29,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const activity = await getRecentWalletActivity(address, network);
+    const activity = await withTimeout(
+      getRecentWalletActivity(address, network),
+      6_000,
+      "Activity fetch timed out.",
+    );
     const normalizedAddress = normalizeAddress(address);
 
     let addressBook = new Map<
@@ -50,17 +55,21 @@ export async function GET(req: NextRequest) {
       ];
 
       if (counterpartyAddresses.length > 0) {
-        const knownUsers = await prisma.user.findMany({
-          where: {
-            starknetAddress: {
-              in: counterpartyAddresses,
+        const knownUsers = await withTimeout(
+          prisma.user.findMany({
+            where: {
+              starknetAddress: {
+                in: counterpartyAddresses,
+              },
             },
-          },
-          select: {
-            username: true,
-            starknetAddress: true,
-          },
-        });
+            select: {
+              username: true,
+              starknetAddress: true,
+            },
+          }),
+          3_000,
+          "Address book lookup timed out.",
+        );
 
         addressBook = new Map(
           knownUsers

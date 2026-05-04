@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useIdentityToken } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import { PredictView } from "./predict-ui";
 import { usePrivyProfile } from "@/lib/use-privy-profile";
@@ -8,6 +9,7 @@ import { usePrivyProfile } from "@/lib/use-privy-profile";
 export default function PredictPage() {
   const { getAccessToken, loadingProfile, logout, profile, ready, user } =
     usePrivyProfile();
+  const { identityToken } = useIdentityToken();
   const router = useRouter();
 
   const handleSignOut = useCallback(async () => {
@@ -33,6 +35,7 @@ export default function PredictPage() {
   return (
     <PredictView
       getAccessToken={getAccessToken}
+      identityToken={identityToken}
       preferredNetwork={profile.preferredNetwork === "mainnet" ? "mainnet" : "sepolia"}
       signOutAction={handleSignOut}
       user={{

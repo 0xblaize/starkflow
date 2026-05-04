@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isPredictEscrowConfigured } from "@/lib/predict-escrow-config";
 import {
   buildPredictMarketView,
   formatCompactUsd,
@@ -8,6 +9,7 @@ import {
 import { getLatestPredictPrices } from "@/lib/predict-prices";
 import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
+import { withTimeout } from "@/lib/promise-timeout";
 
 function formatRelativeTime(value: Date) {
   const diffMs = Date.now() - value.getTime();
@@ -36,9 +38,17 @@ function toNumeric(value: string | null | undefined) {
 export async function GET(req: NextRequest) {
   try {
     const claims = await verifyPrivyToken(req);
-    const user = await getOrCreatePrivyUser(claims);
-    const priceSnapshots = await getLatestPredictPrices(
-      predictMarketDefinitions.map((market) => market.baseAsset),
+    const user = await withTimeout(
+      getOrCreatePrivyUser(claims),
+      6_000,
+      "Profile lookup timed out.",
+    );
+    const priceSnapshots = await withTimeout(
+      getLatestPredictPrices(
+        predictMarketDefinitions.map((market) => market.baseAsset),
+      ),
+      6_000,
+      "Prediction price feed timed out.",
     );
 
     let allBets: Array<{
@@ -55,55 +65,67 @@ export async function GET(req: NextRequest) {
     let myBets: Array<{
       createdAt: Date;
       currentPrice: string | null;
+      entryProbabilityBps: number | null;
+      executionMode: string;
       id: string;
       marketCategory: string;
       marketId: string;
       marketTitle: string;
+      onchainMarketId: string | null;
       outcome: string;
       stakeAmount: string;
       stakeCurrency: string;
       status: string;
       targetPrice: string;
+      txHash: string | null;
     }> = [];
 
     try {
-      [allBets, myBets] = await Promise.all([
-        prisma.predictionBet.findMany({
-          take: 24,
-          orderBy: { createdAt: "desc" },
-          select: {
-            createdAt: true,
-            marketId: true,
-            marketTitle: true,
-            outcome: true,
-            stakeAmount: true,
-            user: {
-              select: {
-                handlePublic: true,
-                username: true,
+      [allBets, myBets] = await withTimeout(
+        Promise.all([
+          prisma.predictionBet.findMany({
+            take: 24,
+            orderBy: { createdAt: "desc" },
+            select: {
+              createdAt: true,
+              marketId: true,
+              marketTitle: true,
+              outcome: true,
+              stakeAmount: true,
+              user: {
+                select: {
+                  handlePublic: true,
+                  username: true,
+                },
               },
             },
-          },
-        }),
-        prisma.predictionBet.findMany({
-          where: { userId: user.id },
-          take: 12,
-          orderBy: { createdAt: "desc" },
-          select: {
-            createdAt: true,
-            currentPrice: true,
-            id: true,
-            marketCategory: true,
-            marketId: true,
-            marketTitle: true,
-            outcome: true,
-            stakeAmount: true,
-            stakeCurrency: true,
-            status: true,
-            targetPrice: true,
-          },
-        }),
-      ]);
+          }),
+          prisma.predictionBet.findMany({
+            where: { userId: user.id },
+            take: 12,
+            orderBy: { createdAt: "desc" },
+            select: {
+              createdAt: true,
+              currentPrice: true,
+              entryProbabilityBps: true,
+              executionMode: true,
+              id: true,
+              marketCategory: true,
+              marketId: true,
+              marketTitle: true,
+              onchainMarketId: true,
+              outcome: true,
+              stakeAmount: true,
+              stakeCurrency: true,
+              status: true,
+              targetPrice: true,
+              txHash: true,
+            },
+          }),
+        ]),
+        6_000,
+        "Prediction history timed out.",
+      );
     } catch (error) {
       console.warn("[/api/predict/markets] DB stats unavailable:", error);
     }
@@ -159,18 +181,23 @@ export async function GET(req: NextRequest) {
       myBets: myBets.map((bet) => ({
         createdAt: bet.createdAt.toISOString(),
         currentPrice: bet.currentPrice,
+        entryProbabilityBps: bet.entryProbabilityBps,
+        executionMode: bet.executionMode,
         id: bet.id,
         marketCategory: bet.marketCategory,
         marketId: bet.marketId,
         marketTitle: bet.marketTitle,
+        onchainMarketId: bet.onchainMarketId,
         outcome: bet.outcome,
         stakeAmount: bet.stakeAmount,
         stakeCurrency: bet.stakeCurrency,
         status: bet.status,
         targetPrice: bet.targetPrice,
+        txHash: bet.txHash,
       })),
       network: user.preferredNetwork,
-      sessionKeySupported: false,
+      onchainExecutionLive:
+        user.preferredNetwork === "sepolia" && isPredictEscrowConfigured(),
       summary: {
         activeHedges: myBets.filter((bet) => bet.status === "OPEN").length,
         activeHedgesDisplay: String(

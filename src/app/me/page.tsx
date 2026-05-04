@@ -61,6 +61,7 @@ export default function MePage() {
 
   return (
     <MeView
+      getAccessToken={getAccessToken}
       signOutAction={handleSignOut}
       updatePreferredNetworkAction={handlePreferredNetworkChange}
       user={{

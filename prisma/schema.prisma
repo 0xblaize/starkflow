@@ -66,6 +66,17 @@ model PredictionBet {
   stakeCurrency  String   @default("USDC")
   network        String   @default("sepolia")
   status         String   @default("OPEN")
+  executionMode  String   @default("OFFCHAIN")
+  onchainMarketId String?
+  escrowAddress  String?
+  txHash         String?
+  claimTxHash    String?
+  entryProbabilityBps Int?
+  settlementPrice String?
+  payoutAmount   String?
+  realizedPnl    String?
+  resolvedAt     DateTime?
+  claimedAt      DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
