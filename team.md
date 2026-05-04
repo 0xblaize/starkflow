@@ -6,10 +6,11 @@ description: Project ownership and public project links.
 
 ## Team
 
-### Alawode Christopher Dolapo
+### Alawode Christopher (Blaize0
 
 Full Stack and Web3 Developer.
 
 ### Project links
 
 * [GitHub repository](https://github.com/0xblaize/starkflow)
+* [Linktree](https://t.co/L3ahKO6KhT)
