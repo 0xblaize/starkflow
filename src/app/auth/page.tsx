@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
 
 function CloseIcon() {
   return (
@@ -65,7 +64,7 @@ function DesktopBackground() {
 }
 
 function AuthPageInner() {
-  const { ready, authenticated, login, getAccessToken, user } = usePrivy();
+  const { ready, authenticated, login } = usePrivy();
   const router = useRouter();
   const searchParams = useSearchParams();
   const launchStartedRef = useRef(false);
@@ -101,66 +100,9 @@ function AuthPageInner() {
 
   useEffect(() => {
     if (!ready || !authenticated) return;
-
-    let cancelled = false;
-
-    async function routeAuthenticatedUser() {
-      setRedirecting(true);
-
-      try {
-        const token = await waitForPrivyAccessToken(getAccessToken);
-
-        if (!token) {
-          throw new Error("Privy access token was not ready");
-        }
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6_500);
-        let response: Response;
-
-        try {
-          response = await fetch("/api/profile", {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              ...(user?.id ? { "x-privy-user-id": user.id } : {}),
-            },
-            cache: "no-store",
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timeout);
-        }
-
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as
-            | { error?: string }
-            | null;
-          throw new Error(
-            payload?.error
-              ? `Failed to fetch profile state: ${payload.error}`
-              : `Failed to fetch profile state (${response.status})`,
-          );
-        }
-
-        const profile: { onboarded?: boolean } = await response.json();
-
-        if (cancelled) return;
-
-        router.push(profile.onboarded ? "/dashboard" : "/setup-profile");
-      } catch (error) {
-        console.error("[auth] failed to route authenticated user", error);
-        if (!cancelled) {
-          router.push(mode === "signup" ? "/setup-profile" : "/dashboard");
-        }
-      }
-    }
-
-    void routeAuthenticatedUser();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, authenticated, router, getAccessToken]);
+    setRedirecting(true);
+    router.push(mode === "signup" ? "/setup-profile" : "/dashboard");
+  }, [ready, authenticated, router, mode]);
 
   useEffect(() => {
     if (!ready || authenticated || launchStartedRef.current) return;
