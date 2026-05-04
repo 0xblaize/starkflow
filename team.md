@@ -6,7 +6,7 @@ description: Project ownership and public project links.
 
 ## Team
 
-### Alawode Christopher (Blaize0
+### Alawode Christopher (Blaize)
 
 Full Stack and Web3 Developer.
 
