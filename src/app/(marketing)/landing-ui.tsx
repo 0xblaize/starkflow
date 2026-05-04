@@ -178,21 +178,21 @@ export function HeroSection() {
             for the <span className="text-[#3B5BFF]">rest of us.</span>
           </h1>
 
-          <p className="mt-6 max-w-140 text-[12px] leading-6 text-[#8f93a3] md:text-[18px] md:leading-8">
+          <p className="mt-6 max-w-140 text-[14px] leading-6 text-[#8f93a3] md:text-[18px] md:leading-8">
             Gasless social payments on Starknet, send to usernames, never worry about seed phrases. The wallet that feels like a messaging app.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Link href="/auth?mode=signup" className="inline-flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#3B5BFF] px-5 text-[11px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
+            <Link href="/auth?mode=signup" className="inline-flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#3B5BFF] px-5 text-[13px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
               Get Started - Gasless
               <ArrowIcon />
             </Link>
-            <a href="#sign-in" className="inline-flex h-11 items-center justify-center rounded-[10px] border border-[#3a4051] px-5 text-[11px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
+            <a href="#sign-in" className="inline-flex h-11 items-center justify-center rounded-[10px] border border-[#3a4051] px-5 text-[13px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
               Explore 
             </a>
           </div>
 
-          <div className="mt-8 flex items-center gap-3 text-[10px] text-[#8d91a1] md:text-[14px]">
+          <div className="mt-8 flex items-center gap-3 text-[12px] text-[#8d91a1] md:text-[14px]">
             <div className="flex items-center pl-1">
               {Array.from({ length: 4 }).map((_, index) => (
                 <span key={index} className="-ml-2 h-8 w-8 rounded-full border-2 border-[#050608] bg-linear-to-br from-white to-[#99a8d8] first:ml-0" />
@@ -226,7 +226,7 @@ export function FeaturesSection() {
     <section id="features" className="px-4 pb-10 pt-8 md:px-8 md:pb-16 md:pt-12 lg:px-12">
       <div className="md:hidden">
         <h2 className="[font-family:var(--font-syne)] text-[28px] tracking-[-0.05em]">Why StarkFlow?</h2>
-        <p className="mt-1 text-[11px] text-[#8f93a3]">Premium features for everyone.</p>
+        <p className="mt-1 text-[13px] text-[#8f93a3]">Premium features for everyone.</p>
       </div>
 
       <div className="hidden md:block">
@@ -244,8 +244,8 @@ export function FeaturesSection() {
             <div className="mb-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#1a2552] md:mb-6 md:h-11 md:w-11 md:rounded-[14px]">
               <FeatureIcon type={feature.icon} />
             </div>
-            <h3 className="[font-family:var(--font-syne)] text-[15px] md:text-[17px] md:font-semibold">{feature.title}</h3>
-            <p className="mt-2 text-[10px] leading-5 text-[#8f93a3] md:mt-5 md:max-w-68.75 md:text-[13px] md:leading-8">
+            <h3 className="[font-family:var(--font-syne)] text-[17px] md:text-[17px] md:font-semibold">{feature.title}</h3>
+            <p className="mt-2 text-[12px] leading-5 text-[#8f93a3] md:mt-5 md:max-w-68.75 md:text-[13px] md:leading-8">
               {feature.desc}
             </p>
           </article>
@@ -260,7 +260,7 @@ export function HowItWorksSection() {
     <section id="how" className="bg-[#1c2027] px-4 py-8 md:px-8 md:py-16 lg:px-12">
       <div className="md:hidden">
         <h2 className="[font-family:var(--font-syne)] text-[28px] tracking-[-0.05em]">How It Works</h2>
-        <p className="mt-1 text-[11px] text-[#8f93a3]">Three steps to social crypto freedom.</p>
+        <p className="mt-1 text-[13px] text-[#8f93a3]">Three steps to social crypto freedom.</p>
       </div>
 
       <div className="mx-auto max-w-295 md:grid md:grid-cols-[0.95fr_1.05fr] md:items-center md:gap-14">
@@ -274,8 +274,8 @@ export function HowItWorksSection() {
                 {step.id}
               </span>
               <div>
-                <h3 className="[font-family:var(--font-syne)] text-[13px] md:text-[20px]">{step.title}</h3>
-                <p className="mt-2 max-w-70 text-[10px] leading-5 text-[#b0b4c0] md:text-[15px] md:leading-8">{step.desc}</p>
+                <h3 className="[font-family:var(--font-syne)] text-[15px] md:text-[20px]">{step.title}</h3>
+                <p className="mt-2 max-w-70 text-[12px] leading-5 text-[#b0b4c0] md:text-[15px] md:leading-8">{step.desc}</p>
               </div>
             </div>
           ))}
@@ -317,10 +317,10 @@ export function CtaSection() {
           payments?
         </h2>
         <div className="relative mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
-            <Link href="/auth?mode=signup" className="inline-flex h-11 items-center justify-center rounded-[10px] bg-black px-5 text-[11px] font-bold text-[#fdfdff] md:h-14 md:px-8 md:text-[16px]">
+            <Link href="/auth?mode=signup" className="inline-flex h-11 items-center justify-center rounded-[10px] bg-black px-5 text-[13px] font-bold text-[#fdfdff] md:h-14 md:px-8 md:text-[16px]">
               Get Started For Free
             </Link>
-          <a href="#sales" className="inline-flex h-11 items-center justify-center rounded-[10px] border border-white/30 px-5 text-[11px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
+          <a href="#sales" className="inline-flex h-11 items-center justify-center rounded-[10px] border border-white/30 px-5 text-[13px] font-bold text-white md:h-14 md:px-8 md:text-[16px]">
             Talk to Sales
           </a>
         </div>
@@ -335,7 +335,7 @@ export function MarketingFooter() {
       <div className="mx-auto grid max-w-350 gap-8 md:grid-cols-[1.2fr_1fr]">
         <div>
           <Brand size={24} />
-          <p className="mt-3 max-w-70 text-[10px] leading-5 text-[#8f93a3] md:text-[14px] md:leading-7">
+          <p className="mt-3 max-w-70 text-[12px] leading-5 text-[#8f93a3] md:text-[14px] md:leading-7">
             Making blockchain intuitive and crypto social. Built for the Starknet ecosystem.
           </p>
           <div className="mt-4 flex gap-2">
@@ -353,7 +353,7 @@ export function MarketingFooter() {
               <h3 className="text-[8px] font-bold tracking-[0.18em] text-white md:text-[12px]">{group.title}</h3>
               <div className="mt-3 grid gap-2">
                 {group.links.map((link) => (
-                  <a key={link} href="#" className="text-[10px] text-[#8f93a3] md:text-[14px]">
+                  <a key={link} href="#" className="text-[12px] text-[#8f93a3] md:text-[14px]">
                     {link}
                   </a>
                 ))}
@@ -363,7 +363,7 @@ export function MarketingFooter() {
         </div>
       </div>
 
-      <div className="mx-auto mt-6 flex max-w-350 flex-col gap-2 border-t border-[#10131a] pt-4 text-[9px] text-[#6f7486] md:flex-row md:items-center md:justify-between md:text-[13px]">
+      <div className="mx-auto mt-6 flex max-w-350 flex-col gap-2 border-t border-[#10131a] pt-4 text-[11px] text-[#6f7486] md:flex-row md:items-center md:justify-between md:text-[13px]">
         <p>(c) 2026 StarkFlow Inc. All rights reserved.</p>
         <div className="flex gap-4">
           <a href="#">Network Status</a>

@@ -920,8 +920,55 @@ function ManagedPositionsPanel({
       ) : null}
 
       {portfolioLoading ? (
-        <div className="mt-5 rounded-[14px] border border-[#272c35] bg-[#14181f] px-4 py-10 text-center text-[13px] text-[#8e97aa]">
-          Loading your prediction, DCA, and yield positions...
+        <div className="mt-5 grid gap-4">
+          <div className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
+            <div className="h-3 w-24 bg-[#272c35] rounded animate-pulse mb-4"></div>
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="h-4 bg-[#272c35] rounded animate-pulse mb-1"></div>
+                      <div className="h-3 w-3/4 bg-[#272c35] rounded animate-pulse"></div>
+                    </div>
+                    <div className="h-5 w-16 bg-[#272c35] rounded-full animate-pulse"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
+            <div className="h-3 w-20 bg-[#272c35] rounded animate-pulse mb-4"></div>
+            <div className="space-y-3">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="h-4 bg-[#272c35] rounded animate-pulse mb-1"></div>
+                      <div className="h-3 w-2/3 bg-[#272c35] rounded animate-pulse"></div>
+                    </div>
+                    <div className="h-5 w-12 bg-[#272c35] rounded animate-pulse"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
+            <div className="h-3 w-16 bg-[#272c35] rounded animate-pulse mb-4"></div>
+            <div className="space-y-3">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="rounded-[14px] border border-[#232834] bg-[#1b2029] px-4 py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="h-4 bg-[#272c35] rounded animate-pulse mb-1"></div>
+                      <div className="h-3 w-1/2 bg-[#272c35] rounded animate-pulse"></div>
+                    </div>
+                    <div className="h-5 w-14 bg-[#272c35] rounded animate-pulse"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       ) : (
         <div className={`mt-5 grid gap-4 ${compact ? "" : "xl:grid-cols-3"}`}>

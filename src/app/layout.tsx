@@ -14,7 +14,13 @@ const dmSans = DM_Sans({
 
 export const metadata = {
   title: "StarkFlow: Gasless Payments for the Rest of Us",
-  description: "High Performance | Self Custodial | Cross Chain Executiont.",
+  description: "High Performance | Self Custodial | Cross Chain Execution.",
+  openGraph: {
+    images: [{ url: '/logo.png' }],
+  },
+  icons: {
+    icon: '/logo.png',
+  },
 };
 
 export default function RootLayout({
