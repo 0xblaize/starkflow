@@ -2,6 +2,7 @@ import { hash, RpcProvider } from "starknet";
 import { mainnetTokens } from "../../node_modules/starkzap/dist/src/erc20/token/presets.js";
 import { sepoliaTokens } from "../../node_modules/starkzap/dist/src/erc20/token/presets.sepolia.js";
 import { normalizePreferredNetwork, type PreferredNetwork } from "@/lib/app-user";
+import { getVerifiedMoveTokens } from "@/lib/move-tokens";
 import { getStarknetRpcUrl } from "@/lib/starknet-rpc";
 
 type Network = "mainnet" | "sepolia";
@@ -19,7 +20,7 @@ type ActivityItem = {
   direction: "received" | "sent";
   fromAddress: string;
   id: string;
-  symbol: "STRK" | "USDC";
+  symbol: string;
   toAddress: string;
   txHash: string;
 };
@@ -149,7 +150,7 @@ async function getFilteredTransferEvents(
   const events = [];
   let continuationToken: string | undefined;
 
-  for (let page = 0; page < 8; page += 1) {
+  for (let page = 0; page < 40; page += 1) {
     const response = await provider.getEvents({
       address: tokenAddress,
       from_block: { block_number: fromBlock },
@@ -330,16 +331,25 @@ export async function getRecentWalletActivity(
 ) {
   const network = normalizePreferredNetwork(preferredNetwork) as PreferredNetwork;
   const provider = getProvider(network);
-  const tokens = getTokens(network);
   const normalizedAddress = normalizeAddress(address);
   const transferSelector = hash.getSelectorFromName("Transfer");
-  const latestBlock = await provider.getBlockNumber();
-  const fromBlock = Math.max(0, latestBlock - 20_000);
+  const fromBlock = 0;
 
-  const tokenEntries = [
-    { symbol: "STRK", token: tokens.STRK },
-    { symbol: "USDC", token: tokens.USDC },
-  ] as const;
+  const tokenEntries = Array.from(
+    new Map(
+      getVerifiedMoveTokens(network).map((token) => [
+        normalizeAddress(token.address),
+        {
+          symbol: token.symbol,
+          token: {
+            address: token.address,
+            decimals: token.decimals,
+            symbol: token.symbol,
+          },
+        },
+      ]),
+    ).values(),
+  );
 
   const eventGroups = await Promise.all(
     tokenEntries.map(async ({ symbol, token }) => {
@@ -377,7 +387,7 @@ export async function getRecentWalletActivity(
                 toAddress: to,
                 txHash: event.transaction_hash,
                 blockNumber: event.block_number ?? 0,
-                contractAddress: token.address,
+                contractAddress: token.address.toString(),
             };
           })
           .filter((event): event is ActivityItem => event !== null);
@@ -394,6 +404,11 @@ export async function getRecentWalletActivity(
       (event, index, items) =>
         items.findIndex((candidate) => candidate.id === event.id) === index,
     )
-    .sort((a, b) => b.blockNumber - a.blockNumber)
-    .slice(0, 50);
+    .sort((left, right) => {
+      if (right.blockNumber !== left.blockNumber) {
+        return right.blockNumber - left.blockNumber;
+      }
+
+      return right.txHash.localeCompare(left.txHash);
+    });
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordAppTransaction } from "@/lib/app-transactions";
 import {
   buildPredictMarketView,
   formatUsd,
@@ -15,9 +16,11 @@ type CreatePredictionBetBody = {
   currentProbabilityBps?: number;
   escrowAddress?: string;
   executionMode?: "OFFCHAIN" | "ONCHAIN";
+  explorerUrl?: string;
   marketId?: string;
   onchainMarketId?: string;
   outcome?: PredictOutcome;
+  sponsoredExecution?: boolean;
   stakeAmount?: string;
   txHash?: string;
 };
@@ -86,6 +89,8 @@ export async function POST(req: NextRequest) {
     const txHash = body.txHash?.trim() ?? null;
     const onchainMarketId = body.onchainMarketId?.trim() ?? null;
     const escrowAddress = body.escrowAddress?.trim() ?? null;
+    const explorerUrl = body.explorerUrl?.trim() ?? null;
+    const sponsoredExecution = body.sponsoredExecution === true;
     const currentProbabilityBps =
       body.currentProbabilityBps != null && Number.isInteger(body.currentProbabilityBps)
         ? body.currentProbabilityBps
@@ -160,6 +165,18 @@ export async function POST(req: NextRequest) {
         volatilityBps,
       },
     });
+
+    if (executionMode === "ONCHAIN" && txHash && user.starknetAddress) {
+      await recordAppTransaction({
+        explorerUrl,
+        kind: "predict_place",
+        network: user.preferredNetwork === "mainnet" ? "mainnet" : "sepolia",
+        sponsoredExecution,
+        txHash,
+        userId: user.id,
+        walletAddress: user.starknetAddress,
+      });
+    }
 
     return NextResponse.json({
       bet: {

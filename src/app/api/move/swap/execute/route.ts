@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { recordAppTransaction } from "@/lib/app-transactions";
 import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
@@ -79,6 +80,18 @@ export async function POST(req: NextRequest) {
       provider: "avnu",
       slippageBps: BigInt(body.slippageBps ?? 100),
     });
+
+    if (user.starknetAddress) {
+      await recordAppTransaction({
+        explorerUrl: tx.explorerUrl,
+        kind: "swap",
+        network: flow.network === "mainnet" ? "mainnet" : "sepolia",
+        sponsoredExecution: !flow.deployed,
+        txHash: tx.hash,
+        userId: user.id,
+        walletAddress: user.starknetAddress,
+      });
+    }
 
     return NextResponse.json({
       amountIn: amountIn.toFormatted(),

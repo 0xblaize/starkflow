@@ -48,7 +48,9 @@ export async function GET(req: NextRequest) {
       const counterpartyAddresses = [
         ...new Set(
           activity
-            .flatMap((item) => [item.fromAddress, item.toAddress])
+            .flatMap((item) =>
+              item ? [item.fromAddress, item.toAddress] : [],
+            )
             .map((value) => normalizeAddress(value))
             .filter((value) => value !== normalizedAddress),
         ),
@@ -87,7 +89,13 @@ export async function GET(req: NextRequest) {
       console.error("[/api/activity] failed to enrich counterparties", error);
     }
 
-    const enrichedActivity = activity.map((item) => {
+    const nonNullActivity = activity.filter(
+      (
+        item,
+      ): item is NonNullable<(typeof activity)[number]> => item != null,
+    );
+
+    const enrichedActivity = nonNullActivity.map((item) => {
       const counterpartyAddress = normalizeAddress(
         item.direction === "received" ? item.fromAddress : item.toAddress,
       );

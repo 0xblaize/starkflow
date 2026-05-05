@@ -197,6 +197,27 @@ function shortHash(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
+async function copyText(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is unavailable.");
+  }
+
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "true");
+  input.style.position = "absolute";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  document.body.removeChild(input);
+}
+
 function frequencyLabel(value: string) {
   if (value === "PT1H") return "Hourly";
   if (value === "PT6H") return "Every 6h";
@@ -698,6 +719,18 @@ function ProfilePanel({
   activeNetwork: string;
 }) {
   const preferredNetwork = user.preferredNetwork === "mainnet" ? "mainnet" : "sepolia";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAddress = useCallback(() => {
+    if (!user.starknetAddress) {
+      return;
+    }
+
+    void copyText(user.starknetAddress).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2_000);
+    });
+  }, [user.starknetAddress]);
 
   return (
     <section
@@ -728,7 +761,15 @@ function ProfilePanel({
         </p>
         <div className="mt-2 flex items-center justify-between gap-3">
           <p className="text-[13px] font-medium text-white">{shortAddress}</p>
-          <CopyIcon />
+          <button
+            type="button"
+            onClick={handleCopyAddress}
+            disabled={!user.starknetAddress}
+            className="inline-flex items-center gap-2 rounded-full bg-[#20253a] px-3 py-1.5 text-[11px] font-semibold text-[#c8d3ff] transition hover:bg-[#283053] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+            {copied ? "Copied" : "Copy"}
+          </button>
         </div>
       </div>
 

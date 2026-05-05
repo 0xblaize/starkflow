@@ -26,7 +26,7 @@ export type PredictPriceSnapshot = {
 export const predictMarketDefinitions: PredictMarketDefinition[] = [
   {
     id: "eth-above-1sigma-24h",
-    onchainMarketId: "ETH24HUP",
+    onchainMarketId: "ETH24HUP2",
     baseAsset: "ETH",
     category: "Crypto Hedge",
     description:

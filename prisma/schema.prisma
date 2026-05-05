@@ -28,7 +28,30 @@ model User {
   sessions            Session[]
   authenticators      Authenticator[]
   dcaStrategies       DcaStrategy[]
+  appTransactions     AppTransaction[]
   predictionBets      PredictionBet[]
+}
+
+model AppTransaction {
+  id                 String   @id @default(cuid())
+  userId             String
+  walletAddress      String
+  network            String
+  kind               String
+  txHash             String   @unique
+  explorerUrl        String?
+  sponsoredExecution Boolean  @default(false)
+  actualFeeRaw       String?
+  actualFeeToken     String?
+  actualFeeUnit      String?
+  actualFeeUsd       String?
+  feeAccountedAt     DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([walletAddress, network, createdAt])
 }
 
 model DcaStrategy {

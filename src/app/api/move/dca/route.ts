@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordAppTransaction } from "@/lib/app-transactions";
 import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
@@ -341,6 +342,18 @@ export async function POST(req: NextRequest) {
           status: createdOrder.status,
           txHash: createdOrder.creationTransactionHash ?? tx.hash,
         },
+      });
+    }
+
+    if (user.starknetAddress) {
+      await recordAppTransaction({
+        explorerUrl: tx.explorerUrl,
+        kind: "dca_create",
+        network: flow.network === "mainnet" ? "mainnet" : "sepolia",
+        sponsoredExecution: !flow.deployed,
+        txHash: createdOrder?.creationTransactionHash ?? tx.hash,
+        userId: user.id,
+        walletAddress: user.starknetAddress,
       });
     }
 

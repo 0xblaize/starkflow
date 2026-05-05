@@ -176,6 +176,14 @@ type SubmitState =
   | { message: string; status: "success" }
   | null;
 
+type AppTransactionPayload = {
+  explorerUrl?: string;
+  kind: "send" | "swap" | "yield_deposit";
+  network: "mainnet" | "sepolia";
+  sponsoredExecution?: boolean;
+  txHash: string;
+};
+
 type BridgeConnectorState = {
   address: string;
   chain: BridgeExternalChain;
@@ -289,6 +297,26 @@ async function fetchPrivyJson<T>(
   }
 
   return payload as T;
+}
+
+async function recordMoveTransaction(
+  getAccessToken: () => Promise<string | null>,
+  identityToken: string | null,
+  payload: AppTransactionPayload,
+) {
+  try {
+    await fetchPrivyJson<{ ok: boolean }>(
+      getAccessToken,
+      identityToken,
+      "/api/transactions",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  } catch (error) {
+    console.warn("[move] failed to record app transaction", error);
+  }
 }
 
 function shortHash(value: string) {
@@ -1033,6 +1061,13 @@ function SendPanel({
           ? { feeMode: "sponsored" as const }
           : undefined,
       );
+      await recordMoveTransaction(getAccessToken, identityToken, {
+        explorerUrl: tx.explorerUrl,
+        kind: "send",
+        network: preferredNetwork,
+        sponsoredExecution: execution.session.sponsoredExecution,
+        txHash: tx.hash,
+      });
       const refreshedToken = await hydrateTokenBalance(selectedToken);
 
       setRecipient(resolvedRecipient);
@@ -1471,6 +1506,13 @@ function SwapPanel({
           ? { feeMode: "sponsored" as const }
           : undefined,
       );
+      await recordMoveTransaction(getAccessToken, identityToken, {
+        explorerUrl: tx.explorerUrl,
+        kind: "swap",
+        network: preferredNetwork,
+        sponsoredExecution: execution.session.sponsoredExecution,
+        txHash: tx.hash,
+      });
       const [refreshedIn, refreshedOut] = await Promise.all([
         hydrateTokenBalance(tokenIn),
         hydrateTokenBalance(tokenOut),
@@ -3444,6 +3486,13 @@ function YieldProgramContent({
           ? { feeMode: "sponsored" as const }
           : undefined,
       );
+      await recordMoveTransaction(getAccessToken, identityToken, {
+        explorerUrl: tx.explorerUrl,
+        kind: "yield_deposit",
+        network: preferredNetwork,
+        sponsoredExecution: execution.session.sponsoredExecution,
+        txHash: tx.hash,
+      });
 
       await loadYieldData();
       setState({

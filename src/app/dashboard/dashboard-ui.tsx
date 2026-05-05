@@ -27,8 +27,11 @@ type DashboardViewProps = {
 
 type LiveBalances = {
   address?: string | null;
+  gasSavedDisplay?: string;
+  gasSavedUsd?: string;
   fetchedAt?: number;
   network?: string;
+  trackedTransactionCount?: number;
   strk: string;
   usdc: string;
   strkbtc: string;
@@ -121,8 +124,11 @@ export function DashboardView({
     if (!starknetAddress) {
       setBalances({
         address: null,
+        gasSavedDisplay: "$0.00",
+        gasSavedUsd: "0.000000",
         network: preferredNetwork,
         strk: "0.0000 STRK",
+        trackedTransactionCount: 0,
         usdc: "0.00 USDC",
         strkbtc: "0.0000 strkBTC",
         portfolioStrkbtc: "0.000000",
@@ -217,7 +223,11 @@ export function DashboardView({
       signOutAction={signOutAction}
       user={user}
     >
-      <TopHero balances={balances} preferredNetwork={preferredNetwork} />
+      <TopHero 
+        balances={balances} 
+        preferredNetwork={preferredNetwork}
+        starknetAddress={starknetAddress}
+      />
 
       <div className="mt-8 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <OnchainAssetsPanel
@@ -376,13 +386,25 @@ function HeaderMenu({
 function TopHero({
   balances,
   preferredNetwork,
+  starknetAddress,
 }: {
   balances: LiveBalances;
   preferredNetwork?: string;
+  starknetAddress?: string | null;
 }) {
+  const [copied, setCopied] = useState(false);
   const networkLabel =
     preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia Testnet";
   const totalUsdValue = formatUsdValue(parseNumericValue(balances.usdTotal));
+
+  const handleCopyAddress = () => {
+    if (!starknetAddress) return;
+    void navigator.clipboard.writeText(starknetAddress).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <section className="rounded-[22px] border border-[#1637c0] bg-[linear-gradient(135deg,#0a1d92_0%,#1328a7_48%,#13208a_100%)] px-6 py-6 shadow-[0_24px_70px_rgba(24,45,180,0.26)] md:px-8 md:py-8">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_560px] lg:items-center">
@@ -411,9 +433,15 @@ function TopHero({
             <HeroActionButton href="/move?tab=swap">
               Swap Assets
             </HeroActionButton>
-            <HeroActionButton href="/predict">
-              Predict Market
-            </HeroActionButton>
+            <button
+              type="button"
+              onClick={handleCopyAddress}
+              disabled={!starknetAddress}
+              className="inline-flex items-center gap-2 rounded-[14px] bg-white/10 px-5 py-4 text-[15px] font-semibold text-white transition hover:bg-white/14 disabled:opacity-60"
+            >
+              <CopyIcon />
+              {copied ? "Address Copied" : "Copy Address"}
+            </button>
             <Link
               href="/move?tab=send"
               className="inline-flex items-center gap-2 px-3 py-3 text-[14px] font-semibold text-white"
@@ -431,7 +459,7 @@ function TopHero({
                 Gas Saved (lifetime)
               </p>
               <p className="mt-2 [font-family:var(--font-syne)] text-[42px] leading-none tracking-[-0.04em]">
-                0.00
+                {balances.gasSavedDisplay ?? "$0.00"}
               </p>
             </div>
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#2940c8] text-[#93a9ff]">
@@ -440,7 +468,11 @@ function TopHero({
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-[13px] text-[#c5d0ff]">
-              Starts counting once sponsored Starknet activity settles onchain.
+              Calculated from tracked Starknet app transaction receipts.
+            </p>
+            <p className="mt-1 text-[12px] text-[#99acff]">
+              {balances.trackedTransactionCount ?? 0} transaction
+              {(balances.trackedTransactionCount ?? 0) === 1 ? "" : "s"} accounted.
             </p>
           </div>
         </div>
@@ -941,7 +973,7 @@ function ActivityPanel({
       <div className="mt-4 overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
         <div className="border-b border-[#2a303a] px-6 py-5">
           <p className="text-[13px] font-semibold uppercase tracking-[0.12em] text-[#98a0b4]">
-            Live Activity
+            Full Wallet Activity
           </p>
         </div>
 
@@ -954,19 +986,18 @@ function ActivityPanel({
               >
                 <div className="min-w-0">
                   <p className="text-[15px] font-semibold text-white">
-                    {item.kind === "deposit"
-                      ? "Onchain deposit"
-                      : item.kind === "internal_transfer"
-                        ? item.direction === "received"
-                          ? "Internal app transfer in"
-                          : "Internal app transfer out"
-                        : item.direction === "received"
-                          ? "Received transfer"
-                          : "Sent transfer"}{" "}
+                    {item.kind === "internal_transfer"
+                      ? item.direction === "received"
+                        ? `Received from ${item.counterpartyLabel ?? "another StarkFlow user"}`
+                        : `Sent to ${item.counterpartyLabel ?? "another StarkFlow user"}`
+                      : item.direction === "received"
+                        ? `Received from ${item.counterpartyLabel ?? "an onchain wallet"}`
+                        : `Sent to ${item.counterpartyLabel ?? "an onchain wallet"}`}{" "}
                     · {item.amount} {item.symbol}
                   </p>
                   <p className="mt-1 truncate text-[12px] text-[#8b95ab]">
                     {networkLabel} · Block #{item.blockNumber} ·{" "}
+                    {item.direction === "received" ? "From" : "To"}{" "}
                     {item.counterpartyLabel ?? "Unknown counterparty"} · Tx{" "}
                     {item.txHash.slice(0, 12)}...
                   </p>
@@ -980,13 +1011,11 @@ function ActivityPanel({
                         : "bg-[#35171a] text-[#ff9599]"
                   }`}
                 >
-                  {item.kind === "deposit"
-                    ? "Deposit"
-                    : item.kind === "internal_transfer"
-                      ? "App Transfer"
-                      : item.direction === "received"
-                        ? "Incoming"
-                        : "Outgoing"}
+                  {item.kind === "internal_transfer"
+                    ? "StarkFlow"
+                    : item.direction === "received"
+                      ? "Incoming"
+                      : "Outgoing"}
                 </span>
               </div>
             ))}

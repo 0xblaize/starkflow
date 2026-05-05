@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordAppTransaction } from "@/lib/app-transactions";
 import {
   getPrivyErrorStatus,
   getPrivyWalletJwts,
@@ -144,6 +145,17 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      if (user.starknetAddress) {
+        await recordAppTransaction({
+          kind: "dca_cancel",
+          network: flow.network === "mainnet" ? "mainnet" : "sepolia",
+          sponsoredExecution: !flow.deployed,
+          txHash: tx.hash,
+          userId: user.id,
+          walletAddress: user.starknetAddress,
+        });
+      }
+
       return NextResponse.json({
         message: `${strategy.sellTokenSymbol} to ${strategy.buyTokenSymbol} DCA cancelled.`,
         txHash: tx.hash,
@@ -199,6 +211,17 @@ export async function POST(req: NextRequest) {
       );
 
       await tx.wait();
+
+      if (user.starknetAddress) {
+        await recordAppTransaction({
+          kind: "yield_withdraw",
+          network: flow.network === "mainnet" ? "mainnet" : "sepolia",
+          sponsoredExecution: !flow.deployed,
+          txHash: tx.hash,
+          userId: user.id,
+          walletAddress: user.starknetAddress,
+        });
+      }
 
       return NextResponse.json({
         message: `${collateralTokenSymbol} withdrawn from yield.`,
