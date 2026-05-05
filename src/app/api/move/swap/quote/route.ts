@@ -50,18 +50,6 @@ export async function POST(req: NextRequest) {
     }
 
     const flow = await initStarkFlow(user.id, userJwt, { deploy: "never" });
-
-    // AVNU's exchange router is mainnet-only. On Sepolia the contract is not
-    // deployed, so the paymaster simulation fails with a cryptic error.
-    if (user.preferredNetwork !== "mainnet") {
-      return NextResponse.json(
-        {
-          error:
-            "Swaps via AVNU require Mainnet. Go to Settings and switch your network to Mainnet to use this feature.",
-        },
-        { status: 400 },
-      );
-    }
     const starkzapTokenIn: Token = {
       address: tokenIn.address,
       decimals: tokenIn.decimals,

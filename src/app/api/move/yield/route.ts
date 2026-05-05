@@ -98,11 +98,19 @@ export async function GET(req: NextRequest) {
       .slice(0, 10)
       .map(mapMarket);
 
+    // Vesu's market listing API (api.vesu.xyz/markets) is mainnet-only.
+    // On Sepolia, getMarkets() always returns [] — surface this clearly in the UI.
+    const sepoliaNotice =
+      flow.network === "sepolia" && filteredMarkets.length === 0
+        ? "Vesu yield pools are only available on Mainnet. Switch your network to Mainnet in the Me page to access live APY rates and make deposits."
+        : null;
+
     return NextResponse.json({
       markets: filteredMarkets,
       network: flow.network,
       positions: positions.map(mapPosition),
       provider: "vesu",
+      sepoliaNotice,
     });
   } catch (error) {
     console.error("[/api/move/yield][GET]", error);

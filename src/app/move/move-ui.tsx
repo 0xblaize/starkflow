@@ -150,6 +150,7 @@ type YieldRouteResponse = {
   network: "mainnet" | "sepolia";
   positions: YieldPositionSummary[];
   provider: string;
+  sepoliaNotice: string | null;
 };
 
 type BridgeRouteResponse = {
@@ -182,11 +183,13 @@ type BridgeConnectorState = {
   walletName: string;
 };
 
+type WalletConnectProvider = any;
+
 type BridgeWalletOption = {
   chain: BridgeExternalChain;
   id: string;
   name: string;
-  provider: Eip1193Provider | SolanaProvider;
+  provider: Eip1193Provider | SolanaProvider | WalletConnectProvider | null;
 };
 
 type BridgeWalletPickerState = {
@@ -431,7 +434,8 @@ function getBridgeDisplayTokens(
   return bridgeTokens;
 }
 
-function getEthereumWalletName(provider: EthereumInjectedProvider) {
+function getEthereumWalletName(provider: EthereumInjectedProvider | WalletConnectProvider) {
+  if ((provider as WalletConnectProvider).isWalletConnect) return "WalletConnect";
   if (provider.isRabby) return "Rabby";
   if (provider.isCoinbaseWallet) return "Coinbase Wallet";
   if (provider.isOKXWallet) return "OKX Wallet";
@@ -440,6 +444,25 @@ function getEthereumWalletName(provider: EthereumInjectedProvider) {
   if (provider.isMetaMask) return "MetaMask";
 
   return "Injected Ethereum Wallet";
+}
+
+async function createWalletConnectProvider(): Promise<WalletConnectProvider> {
+  const { EthereumProvider } = await import("@walletconnect/ethereum-provider");
+  return EthereumProvider.init({
+    projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "",
+    chains: [1, 11155111],
+    showQrModal: true,
+    rpcMap: {
+      "1": "https://cloudflare-eth.com",
+      "11155111": "https://rpc.sepolia.org",
+    },
+    metadata: {
+      name: "StarkFlow",
+      description: "StarkFlow wallet connection",
+      url: window.location.origin,
+      icons: [`${window.location.origin}/favicon.ico`],
+    },
+  });
 }
 
 function getSolanaWalletName(provider: SolanaInjectedProvider) {
@@ -453,35 +476,45 @@ function getSolanaWalletName(provider: SolanaInjectedProvider) {
 
 function detectEthereumWalletOptions() {
   const injected = (window as Window & { ethereum?: EthereumInjectedProvider }).ethereum;
+  const options: BridgeWalletOption[] = [];
 
-  if (!injected) {
-    return [] as BridgeWalletOption[];
+  if (injected) {
+    const providers =
+      injected.providers && injected.providers.length > 0
+        ? injected.providers.map(
+            (provider: Eip1193Provider) => provider as EthereumInjectedProvider,
+          )
+        : [injected];
+    const seen = new Set<Eip1193Provider>();
+
+    options.push(
+      ...providers.flatMap((provider: EthereumInjectedProvider, index: number) => {
+        if (seen.has(provider)) {
+          return [];
+        }
+
+        seen.add(provider);
+
+        return [
+          {
+            chain: "ethereum" as const,
+            id: `ethereum:${getEthereumWalletName(provider)}:${index}`,
+            name: getEthereumWalletName(provider),
+            provider,
+          },
+        ];
+      }),
+    );
   }
 
-  const providers =
-    injected.providers && injected.providers.length > 0
-      ? injected.providers.map(
-          (provider: Eip1193Provider) => provider as EthereumInjectedProvider,
-        )
-      : [injected];
-  const seen = new Set<Eip1193Provider>();
-
-  return providers.flatMap((provider: EthereumInjectedProvider, index: number) => {
-    if (seen.has(provider)) {
-      return [];
-    }
-
-    seen.add(provider);
-
-    return [
-      {
-        chain: "ethereum" as const,
-        id: `ethereum:${getEthereumWalletName(provider)}:${index}`,
-        name: getEthereumWalletName(provider),
-        provider,
-      },
-    ];
+  options.push({
+    chain: "ethereum" as const,
+    id: "ethereum:walletconnect",
+    name: "WalletConnect",
+    provider: null,
   });
+
+  return options;
 }
 
 function detectSolanaWalletOptions() {
@@ -1927,6 +1960,21 @@ function BridgePanel({
   const destinationEndpoint: BridgeEndpoint =
     sourceEndpoint === "starknet" ? selectedExternalChain : "starknet";
 
+  const destinationToken = useMemo(() => {
+    if (!selectedToken) return null;
+
+    if (destinationEndpoint === "starknet") {
+      return {
+        ...selectedToken,
+        address: selectedToken.starknetAddress ?? selectedToken.address,
+        bridgeAddress: selectedToken.starknetBridge ?? selectedToken.bridgeAddress,
+        name: `${selectedToken.name} on Starknet`,
+      };
+    }
+
+    return selectedToken;
+  }, [destinationEndpoint, selectedToken]);
+
   useEffect(() => {
     if (bridgeTokens.length === 0) {
       return;
@@ -2012,7 +2060,8 @@ function BridgePanel({
 
     try {
       if (option.chain === "ethereum") {
-        const provider = option.provider as EthereumInjectedProvider;
+        const provider =
+          option.provider ?? (await createWalletConnectProvider());
         const accounts = (await provider.request({
           method: "eth_requestAccounts",
         })) as string[];
@@ -2254,7 +2303,17 @@ function BridgePanel({
                     ? undefined
                     : () => openWalletPicker(selectedExternalChain)
                 }
-                selectedToken={selectedToken}
+                onSelectToken={
+                  destinationEndpoint === "starknet"
+                    ? undefined
+                    : (symbol) => {
+                        setSelectedSymbols((current) => ({
+                          ...current,
+                          [selectedExternalChain]: symbol,
+                        }));
+                      }
+                }
+                selectedToken={destinationToken}
                 title="To"
                 tokenOptions={bridgeTokens}
                 walletLabel={destinationWalletLabel}
@@ -3425,7 +3484,27 @@ function YieldProgramContent({
         </div>
       ) : null}
 
-      {yieldData ? (
+      {/* Sepolia notice — Vesu markets API is mainnet-only */}
+      {!loading && yieldData?.sepoliaNotice ? (
+        <div className="rounded-[14px] border border-[#2b3a6b] bg-[#0d1530] px-4 py-4">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 text-[18px]">🌐</span>
+            <div>
+              <p className="text-[13px] font-semibold text-[#7da6ff]">
+                Mainnet Required for Yield
+              </p>
+              <p className="mt-1 text-[12px] leading-5 text-[#8fa4d8]">
+                {yieldData.sepoliaNotice}
+              </p>
+              <p className="mt-3 text-[11px] text-[#6b7fa8]">
+                Go to <span className="font-semibold text-[#9fb8ff]">Me → Active Side → Mainnet</span> to enable yield pools.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {yieldData && yieldData.markets.length > 0 ? (
         <>
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
             <div>
@@ -3471,14 +3550,16 @@ function YieldProgramContent({
 
       <InlineState state={state} />
 
-      <button
-        type="button"
-        onClick={handleDeposit}
-        disabled={submitting || !yieldData || yieldData.markets.length === 0}
-        className="h-12 w-full rounded-[12px] bg-[#3151ff] text-[14px] font-semibold text-white shadow-[0_14px_40px_rgba(49,81,255,0.26)] disabled:opacity-60"
-      >
-        {submitting ? "Depositing..." : "Deposit Into Yield"}
-      </button>
+      {!yieldData?.sepoliaNotice ? (
+        <button
+          type="button"
+          onClick={handleDeposit}
+          disabled={submitting || !yieldData || yieldData.markets.length === 0}
+          className="h-12 w-full rounded-[12px] bg-[#3151ff] text-[14px] font-semibold text-white shadow-[0_14px_40px_rgba(49,81,255,0.26)] disabled:opacity-60"
+        >
+          {submitting ? "Depositing..." : "Deposit Into Yield"}
+        </button>
+      ) : null}
 
       <div className="rounded-[14px] border border-[#232937] bg-[#12161d] px-4 py-4">
         <div className="flex items-center justify-between gap-3">

@@ -89,13 +89,14 @@ let cachedStarkzap: any = null;
 
 async function getStarkzap() {
   if (!cachedStarkzap) {
-    const [wallet, signer, presets, config, tokens, tokensSepolia] = await Promise.all([
+    const [wallet, signer, presets, config, tokens, tokensSepolia, swapModule] = await Promise.all([
       import("../../node_modules/starkzap/dist/src/wallet/index.js"),
       import("../../node_modules/starkzap/dist/src/signer/index.js"),
       import("../../node_modules/starkzap/dist/src/account/presets.js"),
       import("../../node_modules/starkzap/dist/src/types/config.js"),
       import("../../node_modules/starkzap/dist/src/erc20/token/presets.js"),
       import("../../node_modules/starkzap/dist/src/erc20/token/presets.sepolia.js"),
+      import("../../node_modules/starkzap/dist/src/swap/avnu.js"),
     ]);
 
     cachedStarkzap = {
@@ -105,6 +106,7 @@ async function getStarkzap() {
       ChainId: config.ChainId,
       mainnetTokens: tokens.mainnetTokens,
       sepoliaTokens: tokensSepolia.sepoliaTokens,
+      AvnuSwapProvider: swapModule.AvnuSwapProvider,
     };
   }
   return cachedStarkzap;
@@ -230,10 +232,25 @@ async function connectPrivyStarknetWallet(
   userJwts: string[],
   deploy: InitStarkFlowOptions["deploy"] = "if_needed",
 ) {
-  const { Wallet, PrivySigner, ArgentXV050Preset, ChainId } = await getStarkzap();
+  const { Wallet, PrivySigner, ArgentXV050Preset, ChainId, AvnuSwapProvider } = await getStarkzap();
   const privy = getPrivyClient();
   const { config } = await resolveNetworkConfig(network);
   const provider = new RpcProvider({ nodeUrl: config.rpcUrl });
+
+  /**
+   * Custom AVNU swap provider that only uses the correct API base for the
+   * current network — no cross-network fallback.
+   *
+   * By default, starkzap falls back from Sepolia → Mainnet when Sepolia
+   * has no routes. This causes the mainnet AVNU router address to appear
+   * in the transaction calldata, which Sepolia paymaster correctly rejects.
+   */
+  const avnuSwapProvider = new AvnuSwapProvider({
+    apiBases: {
+      SN_MAIN: ["https://starknet.api.avnu.fi"],
+      SN_SEPOLIA: ["https://sepolia.api.avnu.fi"], // Sepolia only — no mainnet fallback
+    },
+  });
 
   const signer = new PrivySigner({
     walletId: walletMetadata.walletId,
@@ -301,6 +318,8 @@ async function connectPrivyStarknetWallet(
       ...buildPaymaster(network),
     },
     feeMode: avnuApiKey ? "sponsored" : "user_pays",
+    swapProviders: [avnuSwapProvider],
+    defaultSwapProviderId: "avnu",
   });
 
   if (deploy !== "never") {
