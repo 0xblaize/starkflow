@@ -926,7 +926,7 @@ function ActivityPanel({
   const [visibleCount, setVisibleCount] = useState(5);
 
   useEffect(() => {
-    setVisibleCount(5);
+    setVisibleCount(activity.length);
   }, [activity]);
 
   const visibleActivity = activity.slice(0, visibleCount);

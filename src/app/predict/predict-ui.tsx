@@ -33,9 +33,12 @@ type PredictMarket = {
   currentPriceUsd: number | null;
   description: string;
   id: string;
+  minusTargetDisplay: string;
   noProbability: number;
   onchainMarketId: string;
+  plusTargetDisplay: string;
   priceSource: string;
+  sigmaPercent: string;
   sourceUpdatedAt: string | null;
   state: string;
   targetPriceDisplay: string;
@@ -58,6 +61,9 @@ type PredictSavedBet = {
   marketTitle: string;
   onchainMarketId: string | null;
   outcome: "YES" | "NO";
+  payoutAmount: string | null;
+  resolvedAt: string | null;
+  settlementPrice: string | null;
   stakeAmount: string;
   stakeCurrency: string;
   status: string;
@@ -622,6 +628,26 @@ function MarketCard({
               />
             </div>
 
+            {/* Volatility band row */}
+            <div className="mt-3 rounded-[12px] border border-[#1e2944] bg-[#0e1528] px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#5a7aab]">
+                  30-Day σ Band &nbsp;<span className="font-bold text-[#7da6e8]">{market.sigmaPercent}</span>
+                </p>
+                <div className="flex items-center gap-3 text-[12px] font-semibold">
+                  <span className="flex items-center gap-1">
+                    <span className="text-[#22c55e]">▲</span>
+                    <span className="text-[#a0c8a0]">{market.plusTargetDisplay}</span>
+                  </span>
+                  <span className="text-[#4a5568]">·</span>
+                  <span className="flex items-center gap-1">
+                    <span className="text-[#ef4444]">▼</span>
+                    <span className="text-[#c8a0a0]">{market.minusTargetDisplay}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <div className="mt-5 rounded-[12px] border border-[#222732] bg-[linear-gradient(180deg,#181c23,#14181f)] px-4 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -802,36 +828,84 @@ function MyHedgesCard({ bets }: { bets: PredictSavedBet[] }) {
             No prediction hedges yet. Submit your first YES or NO position to start the book.
           </p>
         ) : (
-          bets.slice(0, 6).map((bet) => (
-            <div
-              key={bet.id}
-              className="rounded-[14px] border border-[#2b303b] bg-[#14181f] px-4 py-4"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[13px] font-semibold text-white">
-                    {bet.marketTitle}
-                  </p>
-                  <p className="mt-1 text-[12px] leading-5 text-[#9099ad]">
-                    {bet.outcome} with {shortStakeDisplay(bet.stakeAmount, bet.stakeCurrency)} -{" "}
-                    {bet.executionMode === "ONCHAIN" ? "Onchain escrow" : "Record only"}
-                  </p>
+          bets.slice(0, 6).map((bet) => {
+            const isSettled = bet.status === "WON" || bet.status === "LOST";
+            const isWon = bet.status === "WON";
+
+            return (
+              <div
+                key={bet.id}
+                className="rounded-[14px] border border-[#2b303b] bg-[#14181f] px-4 py-4"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[13px] font-semibold text-white">
+                      {bet.marketTitle}
+                    </p>
+                    <p className="mt-1 text-[12px] leading-5 text-[#9099ad]">
+                      {bet.outcome} with {shortStakeDisplay(bet.stakeAmount, bet.stakeCurrency)} -{" "}
+                      {bet.executionMode === "ONCHAIN" ? "Onchain escrow" : "Record only"}
+                    </p>
+                  </div>
+
+                  {isSettled ? (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                        isWon
+                          ? "bg-[#133927] text-[#7fe0af]"
+                          : "bg-[#421d1d] text-[#ff9f9f]"
+                      }`}
+                    >
+                      {isWon ? "🏆 WON" : "❌ LOST"}
+                    </span>
+                  ) : (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                        bet.outcome === "YES"
+                          ? "bg-[#133927] text-[#7fe0af]"
+                          : "bg-[#421d1d] text-[#ff9f9f]"
+                      }`}
+                    >
+                      {bet.outcome}
+                    </span>
+                  )}
                 </div>
-                <span
-                  className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                    bet.outcome === "YES"
-                      ? "bg-[#133927] text-[#7fe0af]"
-                      : "bg-[#421d1d] text-[#ff9f9f]"
-                  }`}
-                >
-                  {bet.outcome}
-                </span>
+
+                {isSettled ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-[10px] bg-[#0f1218] px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6b7491]">
+                        Settlement price
+                      </p>
+                      <p className="mt-1 text-[12px] font-semibold text-white">
+                        {bet.settlementPrice
+                          ? `$${Number(bet.settlementPrice).toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-[10px] bg-[#0f1218] px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6b7491]">
+                        {isWon ? "Payout" : "Stake lost"}
+                      </p>
+                      <p className={`mt-1 text-[12px] font-semibold ${
+                        isWon ? "text-[#7fe0af]" : "text-[#ff9f9f]"
+                      }`}>
+                        {isWon
+                          ? bet.payoutAmount
+                            ? `$${Number(bet.payoutAmount).toFixed(2)}`
+                            : "$0.00"
+                          : `-$${Number(bet.stakeAmount).toFixed(2)}`}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-[11px] text-[#7e889d]">
+                    Target {bet.targetPrice} • Recorded {shortTimestamp(bet.createdAt)}
+                  </p>
+                )}
               </div>
-              <p className="mt-3 text-[11px] text-[#7e889d]">
-                Target {bet.targetPrice} • Recorded {shortTimestamp(bet.createdAt)}
-              </p>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </section>

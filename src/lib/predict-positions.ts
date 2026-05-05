@@ -22,6 +22,7 @@ type PredictionBetRecord = {
   status: string;
   targetPrice: string;
   txHash: string | null;
+  volatilityBps: number | null;
 };
 
 export type PredictionPositionView = {
@@ -79,14 +80,34 @@ export function buildPredictionPositionView(
 
   const outcome = normalizeOutcome(bet.outcome);
   const stakeValue = parseNumeric(bet.stakeAmount);
-  const entryPriceUsd = parseNumeric(bet.currentPrice, market.referencePriceUsd);
-  const entryView = buildPredictMarketView(market, {
+  const entryPriceUsd = parseNumeric(bet.currentPrice, 0);
+
+  // σ stored at bet time (in bps). Fall back to 2.5% if not recorded.
+  const entryBetSigma =
+    bet.volatilityBps != null && bet.volatilityBps > 0
+      ? bet.volatilityBps / 10_000
+      : 0.025;
+
+  // Reconstruct the entry target from the stored entry price + sigma.
+  // entryView.targetPriceDisplay will show this correctly in the UI.
+
+  const entrySnapshot: PredictPriceSnapshot = {
     asset: market.baseAsset,
-    priceUsd: entryPriceUsd,
+    priceUsd: entryPriceUsd || null,
     source: "Unavailable",
     updatedAt: bet.createdAt.toISOString(),
-  });
-  const currentView = buildPredictMarketView(market, latestSnapshot);
+  };
+
+  const entryView = buildPredictMarketView(
+    market,
+    entrySnapshot,
+    entryBetSigma,
+  );
+  const currentView = buildPredictMarketView(
+    market,
+    latestSnapshot,
+    entryBetSigma, // use the same entry σ so the title target stays consistent
+  );
 
   const storedEntryProbability =
     bet.entryProbabilityBps != null

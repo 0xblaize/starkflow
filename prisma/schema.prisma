@@ -72,6 +72,8 @@ model PredictionBet {
   txHash         String?
   claimTxHash    String?
   entryProbabilityBps Int?
+  volatilityBps  Int?       // σ in basis points at bet entry (e.g. 200 = 2%)
+  cycleExpiresAt DateTime?  // createdAt + 24h; the settlement boundary
   settlementPrice String?
   payoutAmount   String?
   realizedPnl    String?

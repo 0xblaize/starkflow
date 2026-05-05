@@ -5,7 +5,7 @@ import {
   HowItWorksSection,
   MarketingFooter,
   MarketingNav,
-  StatsSection,
+  // StatsSection,
 } from "./landing-ui";
 
 export default function LandingPage() {
@@ -14,7 +14,7 @@ export default function LandingPage() {
       <div className="min-h-screen w-full bg-[#050608]/95">
         <MarketingNav />
         <HeroSection />
-        <StatsSection />
+        {/* <StatsSection /> */}
         <FeaturesSection />
         <HowItWorksSection />
         <CtaSection />

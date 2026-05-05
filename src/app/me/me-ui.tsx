@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { TopbarAppShell } from "@/components/app-shell/shell";
 import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
 import {
@@ -480,7 +480,12 @@ function DesktopPersonalHub({
             </div>
           </section>
 
-          <form action={signOutAction}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void signOutAction();
+            }}
+          >
             <button
               type="submit"
               className="flex h-12 w-full items-center justify-center rounded-[14px] bg-[#f04d4d] text-[14px] font-semibold text-white"
@@ -659,7 +664,13 @@ function MobilePersonalHub({
         <p className="text-[11px] text-[#727b90]">StarkFlow ({activeNetwork})</p>
         <p className="mt-1 text-[11px] text-[#727b90]">Powered by Starkzap</p>
 
-        <form action={signOutAction} className="mt-4">
+        <form
+          className="mt-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void signOutAction();
+          }}
+        >
           <button type="submit" className="text-[14px] font-semibold text-[#ff4c4c]">
             Sign Out
           </button>
@@ -697,7 +708,7 @@ function ProfilePanel({
       <div className={compact ? "" : "text-center"}>
         <Avatar name={profileName} src={user.image} compact={compact} />
         <h1
-          className={`mt-4 break-words [font-family:var(--font-syne)] font-semibold text-white ${
+          className={`mt-4 break-words [font-family:var(--font-dm-sans)] font-semibold text-white ${
             compact ? "text-[28px]" : "text-[34px] leading-[1.02] 2xl:text-[38px]"
           }`}
         >
@@ -785,7 +796,13 @@ function NetworkSwitchButton({
   value: "mainnet" | "sepolia";
 }) {
   return (
-    <form action={action}>
+    <form
+      onSubmit={async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        await action(formData);
+      }}
+    >
       <input type="hidden" name="preferredNetwork" value={value} />
       <button
         type="submit"

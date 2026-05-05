@@ -1,11 +1,15 @@
-export const NAV_LINKS = ["Product", "How it works", "Docs"];
-
-export const STATS = [
-  { value: "$1.2B+", label: "TOTAL VOLUME" },
-  { value: "$840K", label: "GAS SAVED" },
-  { value: "4.2M", label: "TRANSACTIONS" },
-  { value: "180K+", label: "IDENTITY HOLDERS" },
+export const NAV_LINKS = [
+  { label: "Product", href: "#features" },
+  { label: "How it works", href: "#how" },
+  { label: "Docs", href: "https://blaize.gitbook.io/starkflow" },
 ];
+
+//  export const STATS = [
+//   { value: "$1.2B+", label: "TOTAL VOLUME" },
+//   { value: "$840K", label: "GAS SAVED" },
+//   { value: "4.2M", label: "TRANSACTIONS" },
+//   { value: "180K+", label: "IDENTITY HOLDERS" },
+// ];
 
 export const FEATURES = [
   {

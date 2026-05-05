@@ -7,6 +7,7 @@ import {
   predictMarketDefinitions,
 } from "@/lib/predict-markets";
 import { getLatestPredictPrices } from "@/lib/predict-prices";
+import { getAssetsVolatility } from "@/lib/predict-volatility";
 import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { withTimeout } from "@/lib/promise-timeout";
@@ -43,13 +44,26 @@ export async function GET(req: NextRequest) {
       6_000,
       "Profile lookup timed out.",
     );
-    const priceSnapshots = await withTimeout(
-      getLatestPredictPrices(
-        predictMarketDefinitions.map((market) => market.baseAsset),
+
+    const uniqueAssets = [
+      ...new Set(predictMarketDefinitions.map((m) => m.baseAsset)),
+    ] as const;
+
+    // Fetch live spot prices and 30-day σ concurrently.
+    const [priceSnapshots, volatilityMap] = await Promise.all([
+      withTimeout(
+        getLatestPredictPrices(
+          predictMarketDefinitions.map((market) => market.baseAsset),
+        ),
+        6_000,
+        "Prediction price feed timed out.",
       ),
-      6_000,
-      "Prediction price feed timed out.",
-    );
+      withTimeout(
+        getAssetsVolatility([...uniqueAssets]),
+        8_000,
+        "Volatility computation timed out.",
+      ).catch(() => null), // non-fatal — fall back to defaults inside lib
+    ]);
 
     let allBets: Array<{
       createdAt: Date;
@@ -73,6 +87,9 @@ export async function GET(req: NextRequest) {
       marketTitle: string;
       onchainMarketId: string | null;
       outcome: string;
+      payoutAmount: string | null;
+      resolvedAt: Date | null;
+      settlementPrice: string | null;
       stakeAmount: string;
       stakeCurrency: string;
       status: string;
@@ -115,6 +132,9 @@ export async function GET(req: NextRequest) {
               marketTitle: true,
               onchainMarketId: true,
               outcome: true,
+              payoutAmount: true,
+              resolvedAt: true,
+              settlementPrice: true,
               stakeAmount: true,
               stakeCurrency: true,
               status: true,
@@ -149,13 +169,16 @@ export async function GET(req: NextRequest) {
       marketStats.set(bet.marketId, previous);
     }
 
-    const markets = predictMarketDefinitions.map((market) =>
-      buildPredictMarketView(
+    const markets = predictMarketDefinitions.map((market) => {
+      const sigma = volatilityMap?.[market.baseAsset]?.sigmaFraction ?? 0.025;
+
+      return buildPredictMarketView(
         market,
         priceSnapshots[market.baseAsset],
+        sigma,
         marketStats.get(market.id),
-      ),
-    );
+      );
+    });
 
     const totalVolumeUsd = [...marketStats.values()].reduce(
       (sum, market) => sum + market.totalVolumeUsd,
@@ -189,6 +212,9 @@ export async function GET(req: NextRequest) {
         marketTitle: bet.marketTitle,
         onchainMarketId: bet.onchainMarketId,
         outcome: bet.outcome,
+        payoutAmount: bet.payoutAmount,
+        resolvedAt: bet.resolvedAt?.toISOString() ?? null,
+        settlementPrice: bet.settlementPrice,
         stakeAmount: bet.stakeAmount,
         stakeCurrency: bet.stakeCurrency,
         status: bet.status,

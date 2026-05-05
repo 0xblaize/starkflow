@@ -292,6 +292,86 @@ function shortHash(value: string) {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
+function formatSwapAmount(value: string, maxDecimals = 5) {
+  if (!value.includes(".")) {
+    return value;
+  }
+
+  const [integer, fraction] = value.split(".");
+  const trimmed = fraction.slice(0, maxDecimals).replace(/0+$/g, "");
+
+  return trimmed ? `${integer}.${trimmed}` : integer;
+}
+
+async function getSwapQuotePayload(
+  execution: Awaited<ReturnType<typeof getMoveExecutionClient>>,
+  tokenIn: MoveTokenOption,
+  tokenOut: MoveTokenOption,
+  amountIn: any,
+) {
+  try {
+    return await execution.wallet.getQuote({
+      tokenIn: toStarkzapToken(tokenIn),
+      tokenOut: toStarkzapToken(tokenOut),
+      amountIn,
+      provider: "avnu",
+      slippageBps: BigInt(100),
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /route|no route|route unavailable/i.test(error.message)
+    ) {
+      return await execution.wallet.getQuote({
+        tokenIn: toStarkzapToken(tokenIn),
+        tokenOut: toStarkzapToken(tokenOut),
+        amountIn,
+        slippageBps: BigInt(100),
+      });
+    }
+
+    throw error;
+  }
+}
+
+async function executeSwapWithFallback(
+  execution: Awaited<ReturnType<typeof getMoveExecutionClient>>,
+  tokenIn: MoveTokenOption,
+  tokenOut: MoveTokenOption,
+  amountIn: any,
+  options: any,
+) {
+  try {
+    return await execution.wallet.swap(
+      {
+        tokenIn: toStarkzapToken(tokenIn),
+        tokenOut: toStarkzapToken(tokenOut),
+        amountIn,
+        provider: "avnu",
+        slippageBps: BigInt(100),
+      },
+      options,
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /route|no route|route unavailable/i.test(error.message)
+    ) {
+      return await execution.wallet.swap(
+        {
+          tokenIn: toStarkzapToken(tokenIn),
+          tokenOut: toStarkzapToken(tokenOut),
+          amountIn,
+          slippageBps: BigInt(100),
+        },
+        options,
+      );
+    }
+
+    throw error;
+  }
+}
+
 function normalizeBridgeSymbol(symbol: string) {
   const upper = symbol.toUpperCase();
 
@@ -1277,21 +1357,22 @@ function SwapPanel({
         tokenIn.decimals,
         tokenIn.symbol,
       );
-      const payload = await execution.wallet.getQuote({
-        tokenIn: toStarkzapToken(tokenIn),
-        tokenOut: toStarkzapToken(tokenOut),
+      const payload = await getSwapQuotePayload(
+        execution,
+        tokenIn,
+        tokenOut,
         amountIn,
-        provider: "avnu",
-        slippageBps: BigInt(100),
-      });
+      );
 
       setQuote({
-        amountIn: amountIn.toFormatted(),
-        amountOut: execution.Amount.fromRaw(
-          payload.amountOutBase,
-          tokenOut.decimals,
-          tokenOut.symbol,
-        ).toFormatted(),
+        amountIn: formatSwapAmount(amountIn.toFormatted()),
+        amountOut: formatSwapAmount(
+          execution.Amount.fromRaw(
+            payload.amountOutBase,
+            tokenOut.decimals,
+            tokenOut.symbol,
+          ).toFormatted(),
+        ),
         priceImpactBps: payload.priceImpactBps?.toString() ?? null,
         provider: payload.provider ?? "avnu",
         routeCallCount: payload.routeCallCount ?? null,
@@ -1334,13 +1415,12 @@ function SwapPanel({
         tokenIn.decimals,
         tokenIn.symbol,
       );
-      const quotePayload = await execution.wallet.getQuote({
-        tokenIn: toStarkzapToken(tokenIn),
-        tokenOut: toStarkzapToken(tokenOut),
+      const quotePayload = await getSwapQuotePayload(
+        execution,
+        tokenIn,
+        tokenOut,
         amountIn,
-        provider: "avnu",
-        slippageBps: BigInt(100),
-      });
+      );
 
       await execution.wallet.ensureReady({
         deploy: "if_needed",
@@ -1349,14 +1429,11 @@ function SwapPanel({
           : {}),
       });
 
-      const tx = await execution.wallet.swap(
-        {
-          tokenIn: toStarkzapToken(tokenIn),
-          tokenOut: toStarkzapToken(tokenOut),
-          amountIn,
-          provider: "avnu",
-          slippageBps: BigInt(100),
-        },
+      const tx = await executeSwapWithFallback(
+        execution,
+        tokenIn,
+        tokenOut,
+        amountIn,
         execution.session.sponsoredExecution
           ? { feeMode: "sponsored" as const }
           : undefined,
@@ -1369,12 +1446,14 @@ function SwapPanel({
       setTokenIn(refreshedIn);
       setTokenOut(refreshedOut);
       setQuote({
-        amountIn: amountIn.toFormatted(),
-        amountOut: execution.Amount.fromRaw(
-          quotePayload.amountOutBase,
-          tokenOut.decimals,
-          tokenOut.symbol,
-        ).toFormatted(),
+        amountIn: formatSwapAmount(amountIn.toFormatted()),
+        amountOut: formatSwapAmount(
+          execution.Amount.fromRaw(
+            quotePayload.amountOutBase,
+            tokenOut.decimals,
+            tokenOut.symbol,
+          ).toFormatted(),
+        ),
         priceImpactBps: quotePayload.priceImpactBps?.toString() ?? null,
         provider: quotePayload.provider ?? "avnu",
         routeCallCount: quotePayload.routeCallCount ?? null,
@@ -1577,8 +1656,8 @@ function SwapOutputCard({
         <span className="max-w-full text-[12px] text-[#9ca5b8] sm:text-right">{hint}</span>
       </div>
       <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="[font-family:var(--font-syne)] min-w-0 w-full flex-1 text-[32px] leading-none tracking-[-0.04em] text-white sm:truncate">
-          {value}
+        <p className="[font-family:var(--font-syne)] min-w-0 w-full flex-1 overflow-hidden whitespace-nowrap text-ellipsis text-[32px] leading-none tracking-[-0.04em] text-white sm:truncate">
+          {formatSwapAmount(value)}
         </p>
         <TokenSelectButton token={token} onClick={onTokenClick} />
       </div>
@@ -2664,7 +2743,7 @@ function ProgramPanel({
   program: ProgramCard;
   starknetAddress: string | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(program.icon === "yield");
 
   return (
     <section className="rounded-[20px] border border-[#272c35] bg-[#1f232b] px-5 py-6">

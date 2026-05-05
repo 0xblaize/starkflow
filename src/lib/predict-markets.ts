@@ -9,8 +9,6 @@ export type PredictMarketDefinition = {
   id: string;
   onchainMarketId: string;
   operator: PredictOperator;
-  referencePriceUsd: number;
-  targetOffsetUsd: number;
   timeframe: string;
 };
 
@@ -21,44 +19,46 @@ export type PredictPriceSnapshot = {
   updatedAt: string | null;
 };
 
+/**
+ * Market definitions no longer hold static prices — targets are computed
+ * dynamically each cycle using the live spot price and historical σ.
+ */
 export const predictMarketDefinitions: PredictMarketDefinition[] = [
   {
-    id: "eth-above-3200-friday",
+    id: "eth-above-1sigma-24h",
     onchainMarketId: "ETH24HUP",
     baseAsset: "ETH",
     category: "Crypto Hedge",
     description:
-      "Track a tight ETH upside move over the next 24 hours instead of a far-away moon target.",
+      "Track a tight ETH upside move over the next 24 hours. Target resets each cycle to spot + 1σ volatility.",
     operator: "above",
-    referencePriceUsd: 2350,
-    targetOffsetUsd: 50,
     timeframe: "Next 24h",
   },
   {
-    id: "strk-below-0_85-eod",
+    id: "strk-below-1sigma-24h",
     onchainMarketId: "STRK24HDN",
     baseAsset: "STRK",
     category: "Starknet Ecosystem",
     description:
-      "Keep the STRK market close to spot so the move can actually happen inside a day.",
+      "Keep the STRK market close to spot so the move can actually happen inside a day. Target resets to spot − 1σ.",
     operator: "below",
-    referencePriceUsd: 0.75,
-    targetOffsetUsd: 0.05,
     timeframe: "Next 24h",
   },
   {
-    id: "btc-above-100k-week",
+    id: "btc-above-1sigma-24h",
     onchainMarketId: "BTC24HUP",
     baseAsset: "BTC",
     category: "Macro Hedge",
     description:
-      "Use a small BTC price step that is realistic inside 24 hours instead of a distant six-figure target.",
+      "Use a live BTC price step that is realistic inside 24 hours. Target resets to spot + 1σ volatility.",
     operator: "above",
-    referencePriceUsd: 76000,
-    targetOffsetUsd: 100,
     timeframe: "Next 24h",
   },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Formatting helpers
+// ---------------------------------------------------------------------------
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -86,58 +86,50 @@ function formatMarketPrice(value: number) {
   return formatUsd(value, value < 10 ? 4 : value < 100 ? 2 : 0);
 }
 
-function formatOffsetDisplay(value: number) {
-  if (value >= 1) {
-    return formatUsd(value, value < 10 ? 2 : 0);
+// ---------------------------------------------------------------------------
+// σ-based target computation
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the strike price for the 24h market using live spot + 1σ.
+ *
+ * above market:  target = spot × (1 + σ)
+ * below market:  target = spot × (1 − σ)
+ *
+ * If spot is unavailable we still return a best-effort value using the
+ * sigma alone, which the caller can display as "pending oracle".
+ */
+export function computeTargetPriceUsd(
+  operator: PredictOperator,
+  spotPriceUsd: number,
+  sigmaFraction: number,
+): number {
+  if (operator === "above") {
+    return spotPriceUsd * (1 + sigmaFraction);
   }
 
-  return formatUsd(value, 4);
+  return Math.max(0, spotPriceUsd * (1 - sigmaFraction));
 }
 
-function computeTargetPriceUsd(
-  market: PredictMarketDefinition,
-  _currentPriceUsd: number | null,
-) {
-  const basePrice = market.referencePriceUsd;
-
-  return market.operator === "above"
-    ? basePrice + market.targetOffsetUsd
-    : Math.max(0, basePrice - market.targetOffsetUsd);
-}
-
-function buildMarketTitle(
-  market: PredictMarketDefinition,
-  targetPriceUsd: number,
-) {
-  const comparator = market.operator === "above" ? ">" : "<";
-  return `${market.baseAsset} ${comparator} ${formatMarketPrice(targetPriceUsd)} in 24h`;
-}
-
-export function getPredictMarketDefinition(marketId: string) {
-  return (
-    predictMarketDefinitions.find((market) => market.id === marketId) ?? null
-  );
-}
+// ---------------------------------------------------------------------------
+// Probability model (logistic curve around the strike)
+// ---------------------------------------------------------------------------
 
 export function computePredictProbabilities(
-  market: PredictMarketDefinition,
+  operator: PredictOperator,
   currentPriceUsd: number | null,
+  targetPriceUsd: number,
 ) {
-  const targetPriceUsd = computeTargetPriceUsd(market, currentPriceUsd);
-
   if (currentPriceUsd == null || !Number.isFinite(currentPriceUsd)) {
     return {
       noProbability: 50,
       state: "Oracle pending",
-      targetPriceUsd,
       yesProbability: 50,
     };
   }
 
-  const ratioDelta =
-    (currentPriceUsd - targetPriceUsd) / targetPriceUsd;
-  const signedDelta =
-    market.operator === "above" ? ratioDelta : ratioDelta * -1;
+  const ratioDelta = (currentPriceUsd - targetPriceUsd) / targetPriceUsd;
+  const signedDelta = operator === "above" ? ratioDelta : ratioDelta * -1;
   const logistic = 1 / (1 + Math.exp(-signedDelta * 14));
   const yesProbability = clamp(Math.round(logistic * 100), 5, 95);
   const noProbability = 100 - yesProbability;
@@ -150,42 +142,91 @@ export function computePredictProbabilities(
     state = "Leaning NO";
   }
 
-  return {
-    noProbability,
-    state,
-    targetPriceUsd,
-    yesProbability,
-  };
+  return { noProbability, state, yesProbability };
 }
 
+// ---------------------------------------------------------------------------
+// Market view builder
+// ---------------------------------------------------------------------------
+
+export function getPredictMarketDefinition(marketId: string) {
+  return (
+    predictMarketDefinitions.find((market) => market.id === marketId) ?? null
+  );
+}
+
+/**
+ * Build the full market view from a definition + live oracle snapshot + σ.
+ *
+ * `sigmaFraction` (e.g. 0.023) is supplied by the caller so this function
+ * remains pure and testable without network access.
+ */
 export function buildPredictMarketView(
   market: PredictMarketDefinition,
   snapshot: PredictPriceSnapshot | null,
+  sigmaFraction: number,
   stats?: {
     totalBets?: number;
     totalVolumeUsd?: number;
   },
 ) {
   const currentPriceUsd = snapshot?.priceUsd ?? null;
-  const probabilities = computePredictProbabilities(market, currentPriceUsd);
-  const targetPriceDisplay = formatMarketPrice(probabilities.targetPriceUsd);
+
+  // When spot is unavailable use 0 as a stand-in; probabilities default to 50/50.
+  const effectiveSpot = currentPriceUsd ?? 0;
+
+  const targetPriceUsd = effectiveSpot > 0
+    ? computeTargetPriceUsd(market.operator, effectiveSpot, sigmaFraction)
+    : 0;
+
+  const plusTargetUsd = effectiveSpot > 0
+    ? effectiveSpot * (1 + sigmaFraction)
+    : 0;
+
+  const minusTargetUsd = effectiveSpot > 0
+    ? Math.max(0, effectiveSpot * (1 - sigmaFraction))
+    : 0;
+
+  const probabilities = computePredictProbabilities(
+    market.operator,
+    currentPriceUsd,
+    targetPriceUsd,
+  );
+
+  const targetPriceDisplay =
+    targetPriceUsd > 0 ? formatMarketPrice(targetPriceUsd) : "Pending oracle";
+
   const currentPriceDisplay =
     currentPriceUsd != null
       ? formatMarketPrice(currentPriceUsd)
       : "Unavailable";
 
+  const sigmaPercent = `${(sigmaFraction * 100).toFixed(2)}%`;
+
+  // Title: "ETH > $1,950.23 in 24h"
+  const comparator = market.operator === "above" ? ">" : "<";
+  const title =
+    targetPriceUsd > 0
+      ? `${market.baseAsset} ${comparator} ${formatMarketPrice(targetPriceUsd)} in 24h`
+      : `${market.baseAsset} ${comparator} ??? in 24h`;
+
   return {
     ...market,
     currentPriceDisplay,
     currentPriceUsd,
+    minusTargetDisplay: minusTargetUsd > 0 ? formatMarketPrice(minusTargetUsd) : "—",
+    minusTargetUsd,
     noProbability: probabilities.noProbability,
+    plusTargetDisplay: plusTargetUsd > 0 ? formatMarketPrice(plusTargetUsd) : "—",
+    plusTargetUsd,
     priceSource: snapshot?.source ?? "Unavailable",
+    sigmaFraction,
+    sigmaPercent,
     sourceUpdatedAt: snapshot?.updatedAt ?? null,
     state: probabilities.state,
-    targetOffsetDisplay: formatOffsetDisplay(market.targetOffsetUsd),
     targetPriceDisplay,
-    targetPriceUsd: probabilities.targetPriceUsd,
-    title: buildMarketTitle(market, probabilities.targetPriceUsd),
+    targetPriceUsd,
+    title,
     totalBets: stats?.totalBets ?? 0,
     totalVolumeDisplay: formatCompactUsd(stats?.totalVolumeUsd ?? 0),
     totalVolumeUsd: stats?.totalVolumeUsd ?? 0,

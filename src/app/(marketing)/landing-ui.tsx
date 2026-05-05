@@ -5,7 +5,7 @@ import {
   FeatureIconType,
   FOOTER_LINKS,
   NAV_LINKS,
-  STATS,
+  // STATS,
   STEPS,
 } from "./landing-data";
 
@@ -107,8 +107,8 @@ function MobileMenu() {
       </summary>
       <div className="absolute right-0 top-10 z-50 min-w-44 rounded-2xl border border-[#232838] bg-[#12151c] p-2 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
         {NAV_LINKS.map((link) => (
-          <a key={link} href="#" className="block rounded-xl px-4 py-3 text-[14px] text-[#d7dbe7] transition hover:bg-[#1c2130] hover:text-white">
-            {link}
+          <a key={link.label} href={link.href} className="block rounded-xl px-4 py-3 text-[14px] text-[#d7dbe7] transition hover:bg-[#1c2130] hover:text-white">
+            {link.label}
           </a>
         ))}
       </div>
@@ -143,8 +143,8 @@ export function MarketingNav() {
         </Link>
         <div className="hidden items-center gap-7 text-[14px] text-[#8a90a6] md:flex lg:gap-9">
           {NAV_LINKS.map((link) => (
-            <a key={link} href="#" className="transition hover:text-white">
-              {link}
+            <a key={link.label} href={link.href} className="transition hover:text-white">
+              {link.label}
             </a>
           ))}
         </div>
@@ -208,18 +208,18 @@ export function HeroSection() {
   );
 }
 
-export function StatsSection() {
-  return (
-    <section className="hidden border-y border-[#10131a] bg-[#15171d] px-8 py-5 md:grid md:grid-cols-4 md:gap-5 lg:px-12">
-      {STATS.map((stat) => (
-        <div key={stat.label} className="text-center">
-          <div className="[font-family:var(--font-syne)] text-[26px]">{stat.value}</div>
-          <div className="mt-1 text-[12px] tracking-[0.14em] text-[#83899c]">{stat.label}</div>
-        </div>
-      ))}
-    </section>
-  );
-}
+// export function StatsSection() {
+//   return (
+//     <section className="hidden border-y border-[#10131a] bg-[#15171d] px-8 py-5 md:grid md:grid-cols-4 md:gap-5 lg:px-12">
+//       {STATS.map((stat) => (
+//         <div key={stat.label} className="text-center">
+//           <div className="[font-family:var(--font-syne)] text-[26px]">{stat.value}</div>
+//           <div className="mt-1 text-[12px] tracking-[0.14em] text-[#83899c]">{stat.label}</div>
+//         </div>
+//       ))}
+//     </section>
+//   );
+// }
 
 export function FeaturesSection() {
   return (
@@ -353,7 +353,7 @@ export function MarketingFooter() {
               <h3 className="text-[8px] font-bold tracking-[0.18em] text-white md:text-[12px]">{group.title}</h3>
               <div className="mt-3 grid gap-2">
                 {group.links.map((link) => (
-                  <a key={link} href="#" className="text-[12px] text-[#8f93a3] md:text-[14px]">
+                  <a key={link} href="#" className="text-[10px] text-[#8f93a3] md:text-[14px]">
                     {link}
                   </a>
                 ))}
@@ -363,7 +363,7 @@ export function MarketingFooter() {
         </div>
       </div>
 
-      <div className="mx-auto mt-6 flex max-w-350 flex-col gap-2 border-t border-[#10131a] pt-4 text-[11px] text-[#6f7486] md:flex-row md:items-center md:justify-between md:text-[13px]">
+      <div className="mx-auto mt-6 flex max-w-350 flex-col gap-2 border-t border-[#10131a] pt-4 text-[9px] text-[#6f7486] md:flex-row md:items-center md:justify-between md:text-[13px]">
         <p>(c) 2026 StarkFlow Inc. All rights reserved.</p>
         <div className="flex gap-4">
           <a href="#">Network Status</a>

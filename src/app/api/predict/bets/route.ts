@@ -7,6 +7,7 @@ import {
   type PredictOutcome,
 } from "@/lib/predict-markets";
 import { getLatestPredictPrices } from "@/lib/predict-prices";
+import { getAssetVolatility } from "@/lib/predict-volatility";
 import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 
@@ -125,12 +126,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const marketView = buildPredictMarketView(market, snapshot);
+    // Fetch current σ so we can store it with the bet and use it for settlement.
+    const volatilitySnap = await getAssetVolatility(market.baseAsset).catch(() => null);
+    const sigmaFraction = volatilitySnap?.sigmaFraction ?? 0.025;
+    const volatilityBps = Math.round(sigmaFraction * 10_000);
+
+    const marketView = buildPredictMarketView(market, snapshot, sigmaFraction);
+
+    // 24h cycle: the settlement window closes exactly 24 hours after placement.
+    const cycleExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1_000);
 
     const bet = await prisma.predictionBet.create({
       data: {
         baseAsset: market.baseAsset,
         currentPrice: currentPrice.toFixed(8),
+        cycleExpiresAt,
         entryProbabilityBps: currentProbabilityBps,
         escrowAddress,
         executionMode,
@@ -147,6 +157,7 @@ export async function POST(req: NextRequest) {
         targetPrice: marketView.targetPriceUsd.toFixed(8),
         txHash,
         userId: user.id,
+        volatilityBps,
       },
     });
 
