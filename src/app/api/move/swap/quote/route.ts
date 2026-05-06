@@ -3,6 +3,11 @@ import { getPrivyBearerToken, getPrivyErrorStatus, verifyPrivyToken } from "@/li
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
 import { initStarkFlow } from "@/lib/starkflow-init";
+import {
+  formatSwapModeError,
+  getSwapQuoteForMode,
+  type SwapProviderMode,
+} from "@/lib/swap-provider";
 import { Amount } from "../../../../../../node_modules/starkzap/dist/src/types/amount.js";
 import type { Token } from "../../../../../../node_modules/starkzap/dist/src/types/token.js";
 
@@ -13,6 +18,7 @@ export async function POST(req: NextRequest) {
     const user = await getOrCreatePrivyUser(claims);
     const body = (await req.json()) as {
       amount?: string;
+      providerMode?: SwapProviderMode;
       slippageBps?: number;
       tokenInAddress?: string;
       tokenOutAddress?: string;
@@ -65,24 +71,29 @@ export async function POST(req: NextRequest) {
       ...(tokenOut.metadata ? { metadata: tokenOut.metadata } : {}),
     };
     const amountIn = Amount.parse(body.amount, tokenIn.decimals, tokenIn.symbol);
-    const quote = await flow.wallet.getQuote({
-      tokenIn: starkzapTokenIn,
-      tokenOut: starkzapTokenOut,
-      amountIn,
-      provider: "avnu",
-      slippageBps: BigInt(body.slippageBps ?? 100),
-    });
+    const quote = await getSwapQuoteForMode(
+      flow.wallet,
+      {
+        tokenIn: starkzapTokenIn,
+        tokenOut: starkzapTokenOut,
+        amountIn,
+        slippageBps: BigInt(body.slippageBps ?? 100),
+      },
+      body.providerMode ?? "AUTO",
+    );
 
     return NextResponse.json({
       amountIn: amountIn.toFormatted(),
       amountOut: Amount.fromRaw(
-        quote.amountOutBase,
+        quote.quote.amountOutBase,
         tokenOut.decimals,
         tokenOut.symbol,
       ).toFormatted(),
-      priceImpactBps: quote.priceImpactBps?.toString() ?? null,
-      provider: quote.provider ?? "avnu",
-      routeCallCount: quote.routeCallCount ?? null,
+      fallbackTriggered: quote.fallbackTriggered,
+      priceImpactBps: quote.quote.priceImpactBps?.toString() ?? null,
+      provider: quote.providerUsed,
+      providerMode: quote.providerMode,
+      routeCallCount: quote.quote.routeCallCount ?? null,
       tokenIn,
       tokenOut,
     });
@@ -92,9 +103,7 @@ export async function POST(req: NextRequest) {
       {
         error:
           error instanceof Error
-            ? error.message.includes("no routes")
-              ? "AVNU found no swap routes for this pair or amount. Try a larger amount, a different token pair, or check that both tokens are supported on Mainnet."
-              : error.message
+            ? formatSwapModeError(error, "AUTO")
             : "Failed to fetch swap quote.",
       },
       { status: getPrivyErrorStatus(error) },

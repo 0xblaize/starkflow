@@ -89,7 +89,7 @@ let cachedStarkzap: any = null;
 
 async function getStarkzap() {
   if (!cachedStarkzap) {
-    const [wallet, signer, presets, config, tokens, tokensSepolia, swapModule] = await Promise.all([
+    const [wallet, signer, presets, config, tokens, tokensSepolia, avnu, ekubo] = await Promise.all([
       import("../../node_modules/starkzap/dist/src/wallet/index.js"),
       import("../../node_modules/starkzap/dist/src/signer/index.js"),
       import("../../node_modules/starkzap/dist/src/account/presets.js"),
@@ -97,6 +97,7 @@ async function getStarkzap() {
       import("../../node_modules/starkzap/dist/src/erc20/token/presets.js"),
       import("../../node_modules/starkzap/dist/src/erc20/token/presets.sepolia.js"),
       import("../../node_modules/starkzap/dist/src/swap/avnu.js"),
+      import("../../node_modules/starkzap/dist/src/swap/ekubo.js"),
     ]);
 
     cachedStarkzap = {
@@ -106,7 +107,8 @@ async function getStarkzap() {
       ChainId: config.ChainId,
       mainnetTokens: tokens.mainnetTokens,
       sepoliaTokens: tokensSepolia.sepoliaTokens,
-      AvnuSwapProvider: swapModule.AvnuSwapProvider,
+      AvnuSwapProvider: avnu.AvnuSwapProvider,
+      EkuboSwapProvider: ekubo.EkuboSwapProvider,
     };
   }
   return cachedStarkzap;
@@ -232,7 +234,13 @@ async function connectPrivyStarknetWallet(
   userJwts: string[],
   deploy: InitStarkFlowOptions["deploy"] = "if_needed",
 ) {
-  const { Wallet, PrivySigner, ArgentXV050Preset, ChainId, AvnuSwapProvider } = await getStarkzap();
+  const {
+    Wallet,
+    PrivySigner,
+    ArgentXV050Preset,
+    AvnuSwapProvider,
+    EkuboSwapProvider,
+  } = await getStarkzap();
   const privy = getPrivyClient();
   const { config } = await resolveNetworkConfig(network);
   const provider = new RpcProvider({ nodeUrl: config.rpcUrl });
@@ -251,6 +259,8 @@ async function connectPrivyStarknetWallet(
       SN_SEPOLIA: ["https://sepolia.api.avnu.fi"], // Sepolia only — no mainnet fallback
     },
   });
+
+  const ekuboSwapProvider = new EkuboSwapProvider();
 
   const signer = new PrivySigner({
     walletId: walletMetadata.walletId,
@@ -318,7 +328,7 @@ async function connectPrivyStarknetWallet(
       ...buildPaymaster(network),
     },
     feeMode: avnuApiKey ? "sponsored" : "user_pays",
-    swapProviders: [avnuSwapProvider],
+    swapProviders: [avnuSwapProvider, ekuboSwapProvider],
     defaultSwapProviderId: "avnu",
   });
 

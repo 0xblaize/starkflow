@@ -38,6 +38,7 @@ type StarkzapModules = {
   ArgentXV050Preset: typeof import("../../node_modules/starkzap/dist/src/account/presets.js").ArgentXV050Preset;
   AvnuSwapProvider: typeof import("../../node_modules/starkzap/dist/src/swap/avnu.js").AvnuSwapProvider;
   ChainId: typeof import("../../node_modules/starkzap/dist/src/types/config.js").ChainId;
+  EkuboSwapProvider: typeof import("../../node_modules/starkzap/dist/src/swap/ekubo.js").EkuboSwapProvider;
   PrivySigner: typeof import("../../node_modules/starkzap/dist/src/signer/index.js").PrivySigner;
   Wallet: typeof import("../../node_modules/starkzap/dist/src/wallet/index.js").Wallet;
 };
@@ -94,11 +95,13 @@ async function loadStarkzapModules(): Promise<StarkzapModules> {
       import("../../node_modules/starkzap/dist/src/types/config.js"),
       import("../../node_modules/starkzap/dist/src/types/amount.js"),
       import("../../node_modules/starkzap/dist/src/swap/avnu.js"),
-    ]).then(([wallet, signer, presets, config, amount, avnu]) => ({
+      import("../../node_modules/starkzap/dist/src/swap/ekubo.js"),
+    ]).then(([wallet, signer, presets, config, amount, avnu, ekubo]) => ({
       Amount: amount.Amount,
       ArgentXV050Preset: presets.ArgentXV050Preset,
       AvnuSwapProvider: avnu.AvnuSwapProvider,
       ChainId: config.ChainId,
+      EkuboSwapProvider: ekubo.EkuboSwapProvider,
       PrivySigner: signer.PrivySigner,
       Wallet: wallet.Wallet,
     }));
@@ -219,6 +222,7 @@ export async function getMoveExecutionClient(options: {
       SN_SEPOLIA: ["https://sepolia.api.avnu.fi"],
     },
   });
+  const ekuboSwapProvider = new modules.EkuboSwapProvider();
 
   const wallet = await modules.Wallet.create({
     account: {
@@ -248,7 +252,7 @@ export async function getMoveExecutionClient(options: {
         : {}),
     },
     feeMode: session.sponsoredExecution ? "sponsored" : "user_pays",
-    swapProviders: [avnuSwapProvider],
+    swapProviders: [avnuSwapProvider, ekuboSwapProvider],
     defaultSwapProviderId: "avnu",
   });
 

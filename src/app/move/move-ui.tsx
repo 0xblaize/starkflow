@@ -14,6 +14,15 @@ import { TopbarAppShell } from "@/components/app-shell/shell";
 import { waitForPrivyAccessToken } from "@/lib/privy-access-token";
 import { getMoveExecutionClient } from "@/lib/move-wallet-client";
 import {
+  executeSwapForMode,
+  formatSwapModeError,
+  getSwapProviderLabel,
+  getSwapQuoteForMode,
+  type SwapProviderId,
+  type SwapProviderMode,
+  SWAP_PROVIDER_OPTIONS,
+} from "@/lib/swap-provider";
+import {
   helpItems,
   moveTabs,
   programs,
@@ -63,8 +72,10 @@ type RecipientResolution = {
 type SwapQuoteResponse = {
   amountIn: string;
   amountOut: string;
+  fallbackTriggered: boolean;
   priceImpactBps: string | null;
-  provider: string;
+  provider: SwapProviderId;
+  providerMode: SwapProviderMode;
   routeCallCount: number | null;
   tokenIn: MoveTokenOption;
   tokenOut: MoveTokenOption;
@@ -265,7 +276,6 @@ const moveTokenBalanceCache = new Map<
 >();
 const SOLANA_MAINNET_CHAIN_ID = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 const SOLANA_TESTNET_CHAIN_ID = "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
-const SEPOLIA_SWAP_SAFE_SYMBOLS = new Set(["ETH", "USDC", "USDC.e"]);
 let bridgeModulesPromise: Promise<BridgeModules> | null = null;
 
 async function fetchPrivyJson<T>(
@@ -426,40 +436,6 @@ function formatSwapAmount(value: string, maxDecimals = 5) {
   const trimmed = fraction.slice(0, maxDecimals).replace(/0+$/g, "");
 
   return trimmed ? `${integer}.${trimmed}` : integer;
-}
-
-async function getSwapQuotePayload(
-  execution: Awaited<ReturnType<typeof getMoveExecutionClient>>,
-  tokenIn: MoveTokenOption,
-  tokenOut: MoveTokenOption,
-  amountIn: any,
-) {
-  return await execution.wallet.getQuote({
-    tokenIn: toStarkzapToken(tokenIn),
-    tokenOut: toStarkzapToken(tokenOut),
-    amountIn,
-    provider: "avnu",
-    slippageBps: BigInt(100),
-  });
-}
-
-async function executeSwapWithFallback(
-  execution: Awaited<ReturnType<typeof getMoveExecutionClient>>,
-  tokenIn: MoveTokenOption,
-  tokenOut: MoveTokenOption,
-  amountIn: any,
-  options: any,
-) {
-  return await execution.wallet.swap(
-    {
-      tokenIn: toStarkzapToken(tokenIn),
-      tokenOut: toStarkzapToken(tokenOut),
-      amountIn,
-      provider: "avnu",
-      slippageBps: BigInt(100),
-    },
-    options,
-  );
 }
 
 function normalizeBridgeSymbol(symbol: string) {
@@ -659,38 +635,6 @@ function toStarkzapToken(token: {
     name: token.name,
     symbol: token.symbol,
   };
-}
-
-function filterSwapTokensForNetwork(
-  preferredNetwork: "mainnet" | "sepolia",
-  tokens: MoveTokenOption[],
-) {
-  if (preferredNetwork !== "sepolia") {
-    return tokens;
-  }
-
-  const filtered = tokens.filter((token) =>
-    SEPOLIA_SWAP_SAFE_SYMBOLS.has(token.symbol),
-  );
-
-  return filtered.length ? filtered : tokens;
-}
-
-function formatSwapRouteError(
-  preferredNetwork: "mainnet" | "sepolia",
-  error: unknown,
-) {
-  if (!(error instanceof Error)) {
-    return "Swap request failed.";
-  }
-
-  if (/AVNU quote returned no routes/i.test(error.message)) {
-    return preferredNetwork === "sepolia"
-      ? "AVNU has no live Sepolia route for this pair and amount. Try ETH or USDC on testnet, reduce the amount, or switch to Mainnet."
-      : "AVNU has no live route for this pair and amount. Try a larger amount or another token pair.";
-  }
-
-  return error.message;
 }
 
 async function createConnectedBridgeWallet(
@@ -1449,12 +1393,9 @@ function SwapPanel({
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<SwapQuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [providerMode, setProviderMode] = useState<SwapProviderMode>("AUTO");
   const [submitLoading, setSubmitLoading] = useState(false);
   const [state, setState] = useState<SubmitState>(null);
-  const swapPickerFilter =
-    preferredNetwork === "sepolia"
-      ? (token: MoveTokenOption) => SEPOLIA_SWAP_SAFE_SYMBOLS.has(token.symbol)
-      : undefined;
 
   async function hydrateTokenBalance(token: MoveTokenOption) {
     const cacheKey = tokenBalanceCacheKey(
@@ -1518,17 +1459,14 @@ function SwapPanel({
           moveTokenListCache.set(cacheKey, payload.tokens);
         }
 
-        const swapTokens = filterSwapTokensForNetwork(preferredNetwork, payload.tokens);
         const defaultIn =
-          swapTokens.find((token) => token.symbol === "ETH") ??
-          swapTokens.find((token) => token.symbol === "STRK") ??
-          swapTokens[0] ??
+          payload.tokens.find((token) => token.symbol === "STRK") ??
+          payload.tokens[0] ??
           null;
         const defaultOut =
-          swapTokens.find((token) => token.symbol === "USDC") ??
-          swapTokens.find((token) => token.symbol === "USDC.e") ??
-          swapTokens.find((token) => token.symbol !== defaultIn?.symbol) ??
-          swapTokens[1] ??
+          payload.tokens.find((token) => token.symbol === "USDC") ??
+          payload.tokens.find((token) => token.symbol !== "STRK") ??
+          payload.tokens[1] ??
           null;
 
         if (!defaultIn || !defaultOut || cancelled) return;
@@ -1557,7 +1495,7 @@ function SwapPanel({
     return () => {
       cancelled = true;
     };
-  }, [getAccessToken, preferredNetwork]);
+  }, [getAccessToken, identityToken, preferredNetwork, starknetAddress]);
 
   async function handleQuote() {
     if (!tokenIn || !tokenOut) return;
@@ -1579,30 +1517,32 @@ function SwapPanel({
         identityToken,
         preferredNetwork,
       });
-      const amountIn = execution.Amount.parse(
-        amount,
-        tokenIn.decimals,
-        tokenIn.symbol,
-      );
-      const payload = await getSwapQuotePayload(
-        execution,
-        tokenIn,
-        tokenOut,
-        amountIn,
+      const amountIn = execution.Amount.parse(amount, tokenIn.decimals, tokenIn.symbol);
+      const payload = await getSwapQuoteForMode(
+        execution.wallet,
+        {
+          tokenIn: toStarkzapToken(tokenIn),
+          tokenOut: toStarkzapToken(tokenOut),
+          amountIn,
+          slippageBps: BigInt(100),
+        },
+        providerMode,
       );
 
       setQuote({
         amountIn: formatSwapAmount(amountIn.toFormatted()),
         amountOut: formatSwapAmount(
           execution.Amount.fromRaw(
-            payload.amountOutBase,
+            payload.quote.amountOutBase,
             tokenOut.decimals,
             tokenOut.symbol,
           ).toFormatted(),
         ),
-        priceImpactBps: payload.priceImpactBps?.toString() ?? null,
-        provider: payload.provider ?? "avnu",
-        routeCallCount: payload.routeCallCount ?? null,
+        fallbackTriggered: payload.fallbackTriggered,
+        priceImpactBps: payload.quote.priceImpactBps?.toString() ?? null,
+        provider: payload.providerUsed,
+        providerMode: payload.providerMode,
+        routeCallCount: payload.quote.routeCallCount ?? null,
         tokenIn,
         tokenOut,
       });
@@ -1610,7 +1550,7 @@ function SwapPanel({
       setQuote(null);
       setState({
         status: "error",
-        error: formatSwapRouteError(preferredNetwork, error),
+        error: formatSwapModeError(error, providerMode),
       });
     } finally {
       setQuoteLoading(false);
@@ -1637,16 +1577,16 @@ function SwapPanel({
         identityToken,
         preferredNetwork,
       });
-      const amountIn = execution.Amount.parse(
-        amount,
-        tokenIn.decimals,
-        tokenIn.symbol,
-      );
-      const quotePayload = await getSwapQuotePayload(
-        execution,
-        tokenIn,
-        tokenOut,
-        amountIn,
+      const amountIn = execution.Amount.parse(amount, tokenIn.decimals, tokenIn.symbol);
+      const quotePayload = await getSwapQuoteForMode(
+        execution.wallet,
+        {
+          tokenIn: toStarkzapToken(tokenIn),
+          tokenOut: toStarkzapToken(tokenOut),
+          amountIn,
+          slippageBps: BigInt(100),
+        },
+        providerMode,
       );
 
       await execution.wallet.ensureReady({
@@ -1656,21 +1596,25 @@ function SwapPanel({
           : {}),
       });
 
-      const tx = await executeSwapWithFallback(
-        execution,
-        tokenIn,
-        tokenOut,
-        amountIn,
+      const tx = await executeSwapForMode(
+        execution.wallet,
+        {
+          tokenIn: toStarkzapToken(tokenIn),
+          tokenOut: toStarkzapToken(tokenOut),
+          amountIn,
+          slippageBps: BigInt(100),
+        },
+        providerMode,
         execution.session.sponsoredExecution
           ? { feeMode: "sponsored" as const }
           : undefined,
       );
       await recordMoveTransaction(getAccessToken, identityToken, {
-        explorerUrl: tx.explorerUrl,
+        explorerUrl: tx.tx.explorerUrl,
         kind: "swap",
         network: preferredNetwork,
         sponsoredExecution: execution.session.sponsoredExecution,
-        txHash: tx.hash,
+        txHash: tx.tx.hash,
       });
       const [refreshedIn, refreshedOut] = await Promise.all([
         hydrateTokenBalance(tokenIn),
@@ -1683,25 +1627,27 @@ function SwapPanel({
         amountIn: formatSwapAmount(amountIn.toFormatted()),
         amountOut: formatSwapAmount(
           execution.Amount.fromRaw(
-            quotePayload.amountOutBase,
+            quotePayload.quote.amountOutBase,
             tokenOut.decimals,
             tokenOut.symbol,
           ).toFormatted(),
         ),
-        priceImpactBps: quotePayload.priceImpactBps?.toString() ?? null,
-        provider: quotePayload.provider ?? "avnu",
-        routeCallCount: quotePayload.routeCallCount ?? null,
+        fallbackTriggered: tx.fallbackTriggered || quotePayload.fallbackTriggered,
+        priceImpactBps: quotePayload.quote.priceImpactBps?.toString() ?? null,
+        provider: tx.providerUsed,
+        providerMode: tx.providerMode,
+        routeCallCount: quotePayload.quote.routeCallCount ?? null,
         tokenIn,
         tokenOut,
       });
       setState({
         status: "success",
-        message: `Swap submitted in ${shortHash(tx.hash)}.`,
+        message: `${getSwapProviderLabel(tx.providerUsed)} swap submitted in ${shortHash(tx.tx.hash)}.`,
       });
     } catch (error) {
       setState({
         status: "error",
-        error: formatSwapRouteError(preferredNetwork, error),
+        error: formatSwapModeError(error, providerMode),
       });
     } finally {
       setSubmitLoading(false);
@@ -1709,16 +1655,19 @@ function SwapPanel({
   }
 
   const quoteHint = useMemo(() => {
-    if (!quote) return "Quote is fetched from Starkzap AVNU routing.";
+    if (!quote) {
+      return `Mode: ${getSwapProviderLabel(providerMode)}. Auto tries StarkZap / AVNU first, then Ekubo on no-route errors.`;
+    }
 
     const parts = [
+      `${getSwapProviderLabel(quote.provider)} route`,
       `${quote.amountOut} estimated`,
       quote.routeCallCount ? `${quote.routeCallCount} route calls` : null,
       quote.priceImpactBps ? `${quote.priceImpactBps} bps impact` : null,
     ].filter(Boolean);
 
     return parts.join(" - ");
-  }, [quote]);
+  }, [providerMode, quote]);
 
   return (
     <>
@@ -1737,12 +1686,43 @@ function SwapPanel({
           </span>
         </div>
 
-        {preferredNetwork === "sepolia" ? (
-          <div className="mt-4 rounded-[14px] border border-[#2b3a6b] bg-[#0d1530] px-4 py-4 text-[12px] leading-5 text-[#8fa4d8]">
-            Sepolia AVNU liquidity is limited. StarkFlow now keeps testnet swap selection constrained to the
-            most reliable assets, but if you still get no route you need Mainnet for full swap routing.
-          </div>
-        ) : null}
+        <div className="mt-4 grid gap-2 md:grid-cols-3">
+          {SWAP_PROVIDER_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                setProviderMode(option.value);
+                setQuote(null);
+                setState(null);
+              }}
+              className={`rounded-[14px] border px-4 py-3 text-left transition ${
+                providerMode === option.value
+                  ? "border-[#3d63ff] bg-[#13255f] text-white"
+                  : "border-[#2a303b] bg-black/40 text-[#b8c0d4]"
+              }`}
+            >
+              <p className="text-[13px] font-semibold">{option.label}</p>
+              <p className="mt-1 text-[11px] leading-5 text-inherit/80">
+                {option.description}
+              </p>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-[#9ca5b8]">
+          <span className="rounded-full border border-[#2a303b] bg-black/40 px-3 py-1">
+            Selected mode: {getSwapProviderLabel(providerMode)}
+          </span>
+          {quote ? (
+            <span className="rounded-full border border-[#24418f] bg-[#11204f] px-3 py-1 text-[#b7cbff]">
+              Using {getSwapProviderLabel(quote.provider)}
+              {quote.providerMode === "AUTO" && quote.fallbackTriggered
+                ? " via Auto fallback"
+                : ""}
+            </span>
+          ) : null}
+        </div>
 
         <div className="mt-4 rounded-[14px] border border-[#2a303b] bg-black px-4 py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1836,7 +1816,6 @@ function SwapPanel({
           }}
           open={pickerTarget !== null}
           preferredNetwork={preferredNetwork}
-          tokenFilter={swapPickerFilter}
           title={pickerTarget === "in" ? "Select token to sell" : "Select token to buy"}
         />
     </>

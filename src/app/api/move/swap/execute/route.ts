@@ -3,21 +3,36 @@ import { recordAppTransaction } from "@/lib/app-transactions";
 import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
+import {
+  executeSwapForMode,
+  formatSwapModeError,
+  getSwapQuoteForMode,
+  type SwapProviderMode,
+} from "@/lib/swap-provider";
 import { initStarkFlow } from "@/lib/starkflow-init";
 import { Amount } from "../../../../../../node_modules/starkzap/dist/src/types/amount.js";
 import type { Token } from "../../../../../../node_modules/starkzap/dist/src/types/token.js";
 
+type SwapExecutionReceipt = {
+  explorerUrl?: string;
+  hash: string;
+};
+
 export async function POST(req: NextRequest) {
+  let providerMode: SwapProviderMode = "AUTO";
+
   try {
     const claims = await verifyPrivyToken(req);
     const userJwts = getPrivyWalletJwts(req);
     const user = await getOrCreatePrivyUser(claims);
     const body = (await req.json()) as {
       amount?: string;
+      providerMode?: SwapProviderMode;
       slippageBps?: number;
       tokenInAddress?: string;
       tokenOutAddress?: string;
     };
+    providerMode = body.providerMode ?? "AUTO";
 
     if (!body.tokenInAddress?.trim() || !body.tokenOutAddress?.trim()) {
       return NextResponse.json(
@@ -66,28 +81,34 @@ export async function POST(req: NextRequest) {
       ...(tokenOut.metadata ? { metadata: tokenOut.metadata } : {}),
     };
     const amountIn = Amount.parse(body.amount, tokenIn.decimals, tokenIn.symbol);
-    const quote = await flow.wallet.getQuote({
-      tokenIn: starkzapTokenIn,
-      tokenOut: starkzapTokenOut,
-      amountIn,
-      provider: "avnu",
-      slippageBps: BigInt(body.slippageBps ?? 100),
-    });
-    const tx = await flow.wallet.swap({
-      tokenIn: starkzapTokenIn,
-      tokenOut: starkzapTokenOut,
-      amountIn,
-      provider: "avnu",
-      slippageBps: BigInt(body.slippageBps ?? 100),
-    });
+    const quote = await getSwapQuoteForMode(
+      flow.wallet,
+      {
+        tokenIn: starkzapTokenIn,
+        tokenOut: starkzapTokenOut,
+        amountIn,
+        slippageBps: BigInt(body.slippageBps ?? 100),
+      },
+      providerMode,
+    );
+    const tx = await executeSwapForMode<SwapExecutionReceipt>(
+      flow.wallet,
+      {
+        tokenIn: starkzapTokenIn,
+        tokenOut: starkzapTokenOut,
+        amountIn,
+        slippageBps: BigInt(body.slippageBps ?? 100),
+      },
+      providerMode,
+    );
 
     if (user.starknetAddress) {
       await recordAppTransaction({
-        explorerUrl: tx.explorerUrl,
+        explorerUrl: tx.tx.explorerUrl,
         kind: "swap",
         network: flow.network === "mainnet" ? "mainnet" : "sepolia",
         sponsoredExecution: !flow.deployed,
-        txHash: tx.hash,
+        txHash: tx.tx.hash,
         userId: user.id,
         walletAddress: user.starknetAddress,
       });
@@ -96,17 +117,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       amountIn: amountIn.toFormatted(),
       amountOut: Amount.fromRaw(
-        quote.amountOutBase,
+        quote.quote.amountOutBase,
         tokenOut.decimals,
         tokenOut.symbol,
       ).toFormatted(),
-      explorerUrl: tx.explorerUrl,
-      priceImpactBps: quote.priceImpactBps?.toString() ?? null,
-      provider: quote.provider ?? "avnu",
-      routeCallCount: quote.routeCallCount ?? null,
+      explorerUrl: tx.tx.explorerUrl,
+      fallbackTriggered: tx.fallbackTriggered || quote.fallbackTriggered,
+      priceImpactBps: quote.quote.priceImpactBps?.toString() ?? null,
+      provider: tx.providerUsed,
+      providerMode: tx.providerMode,
+      routeCallCount: quote.quote.routeCallCount ?? null,
       tokenIn,
       tokenOut,
-      txHash: tx.hash,
+      txHash: tx.tx.hash,
     });
   } catch (error) {
     console.error("[/api/move/swap/execute]", error);
@@ -114,11 +137,9 @@ export async function POST(req: NextRequest) {
       {
         error:
           error instanceof Error
-            ? error.message.includes("no routes")
-              ? "AVNU found no swap routes for this pair or amount. Try a larger amount, a different token pair, or check that both tokens are supported on Mainnet."
-              : error.message.includes("not deployed")
+            ? error.message.includes("not deployed")
                 ? "Swap contract not found on this network. Switch to Mainnet in Settings."
-                : error.message
+                : formatSwapModeError(error, providerMode)
             : "Failed to execute swap.",
       },
       { status: getPrivyErrorStatus(error) },
