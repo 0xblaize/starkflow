@@ -222,7 +222,12 @@ export async function getMoveExecutionClient(options: {
       SN_SEPOLIA: ["https://sepolia.api.avnu.fi"],
     },
   });
-  const ekuboSwapProvider = new modules.EkuboSwapProvider();
+  const ekuboSwapProvider = new modules.EkuboSwapProvider({
+    fetcher:
+      typeof window !== "undefined"
+        ? window.fetch.bind(window)
+        : fetch,
+  });
 
   const wallet = await modules.Wallet.create({
     account: {
