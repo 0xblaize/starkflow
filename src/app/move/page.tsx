@@ -16,7 +16,7 @@ function MovePageInner() {
   const currentTab =
     searchParams.get("tab") === "send" || searchParams.get("tab") === "swap" || searchParams.get("tab") === "bridge"
       ? (searchParams.get("tab") as "send" | "swap" | "bridge")
-      : "bridge";
+      : "swap";
 
   const handleSignOut = useCallback(async () => {
     await logout();

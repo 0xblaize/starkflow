@@ -283,6 +283,8 @@ const moveTokenBalanceCache = new Map<
 const SOLANA_MAINNET_CHAIN_ID = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 const SOLANA_TESTNET_CHAIN_ID = "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
 let bridgeModulesPromise: Promise<BridgeModules> | null = null;
+const BRIDGE_UNAVAILABLE_MESSAGE =
+  "Bridge is temporarily unavailable. Swap and wallet actions still work.";
 
 async function fetchPrivyJson<T>(
   getAccessToken: () => Promise<string | null>,
@@ -395,6 +397,25 @@ function formatBridgeFeeEstimate(value: unknown) {
   ].filter((part): part is string => Boolean(part));
 
   return parts.length ? parts.join(" · ") : null;
+}
+
+function formatBridgeError(
+  error: unknown,
+  fallback = BRIDGE_UNAVAILABLE_MESSAGE,
+) {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+
+  if (
+    /Failed to fetch|HTTP request failed|could not coalesce error|Bad gateway|502|bridge routes timed out|temporarily unavailable/i.test(
+      error.message,
+    )
+  ) {
+    return BRIDGE_UNAVAILABLE_MESSAGE;
+  }
+
+  return error.message || fallback;
 }
 
 function getExternalExplorerBase(
@@ -896,11 +917,11 @@ function MainMovePanel({
     <section className="mt-4 overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
       <div className="border-b border-[#2a303a] px-4 py-4 md:px-5">
         <div className="flex flex-wrap items-center gap-2 rounded-[14px] bg-[#181c23] p-1">
-          <ModeLink mode="send" currentTab={currentTab}>
-            Send
-          </ModeLink>
           <ModeLink mode="swap" currentTab={currentTab}>
             Swap
+          </ModeLink>
+          <ModeLink mode="send" currentTab={currentTab}>
+            Send
           </ModeLink>
           <ModeLink mode="bridge" currentTab={currentTab}>
             Bridge
@@ -2217,10 +2238,7 @@ function BridgePanel({
         if (!cancelled) {
           setState({
             status: "error",
-            error:
-              error instanceof Error
-                ? error.message
-                : "Failed to load bridge routes.",
+            error: formatBridgeError(error),
           });
         }
       } finally {
@@ -2320,10 +2338,7 @@ function BridgePanel({
           setBridgeInsights(null);
           setState({
             status: "error",
-            error:
-              error instanceof Error
-                ? error.message
-                : "Failed to load bridge balances.",
+            error: formatBridgeError(error),
           });
         }
       } finally {
@@ -2529,8 +2544,7 @@ function BridgePanel({
     } catch (error) {
       setState({
         status: "error",
-        error:
-          error instanceof Error ? error.message : "Failed to submit bridge deposit.",
+        error: formatBridgeError(error, "Failed to submit bridge deposit."),
       });
     } finally {
       setSubmitting(false);

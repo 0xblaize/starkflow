@@ -119,6 +119,38 @@ function formatUsdValue(value: number) {
   })}`;
 }
 
+function SectionToggle({
+  description,
+  open,
+  title,
+  onToggle,
+}: {
+  description?: string;
+  open: boolean;
+  title: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center justify-between gap-4 rounded-[16px] border border-[#2a303a] bg-[#171b22] px-5 py-4 text-left transition hover:border-[#3151ff]"
+    >
+      <div>
+        <p className="[font-family:var(--font-syne)] text-[20px] font-semibold text-white md:text-[22px]">
+          {title}
+        </p>
+        {description ? (
+          <p className="mt-1 text-[13px] text-[#8b95ab]">{description}</p>
+        ) : null}
+      </div>
+      <span className="rounded-full border border-[#313644] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#bfc7da]">
+        {open ? "Hide" : "Open"}
+      </span>
+    </button>
+  );
+}
+
 export function DashboardView({
   signOutAction,
   starknetAddress,
@@ -138,7 +170,6 @@ export function DashboardView({
     strkPriceUsd: null,
     btcPriceUsd: null,
   });
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   const fetchBalances = useCallback(async () => {
     if (!starknetAddress) {
@@ -188,55 +219,18 @@ export function DashboardView({
   }, [preferredNetwork, starknetAddress]);
 
   useEffect(() => {
-    void fetchBalances();
+    const initialFetch = setTimeout(() => {
+      void fetchBalances();
+    }, 0);
     const interval = setInterval(() => {
       if (document.hidden) return;
       void fetchBalances();
     }, 30_000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
   }, [fetchBalances]);
-
-  const fetchActivity = useCallback(async () => {
-    if (!starknetAddress) {
-      setActivity([]);
-      return;
-    }
-
-    const cacheKey = `${preferredNetwork}:${starknetAddress}`;
-    const cached = activityMemoryCache.get(cacheKey);
-
-    if (cached) {
-      setActivity(cached);
-    }
-
-    try {
-      const params = new URLSearchParams({
-        address: starknetAddress,
-        network: preferredNetwork,
-      });
-      const res = await fetch(`/api/activity?${params.toString()}`, {
-        cache: "no-store",
-      });
-
-      if (res.ok) {
-        const data = (await res.json()) as { activity?: ActivityItem[] };
-        const nextActivity = data.activity ?? [];
-        activityMemoryCache.set(cacheKey, nextActivity);
-        setActivity(nextActivity);
-      }
-    } catch {
-      // Keep the last known activity list on transient RPC failures.
-    }
-  }, [preferredNetwork, starknetAddress]);
-
-  useEffect(() => {
-    void fetchActivity();
-    const interval = setInterval(() => {
-      if (document.hidden) return;
-      void fetchActivity();
-    }, 30_000);
-    return () => clearInterval(interval);
-  }, [fetchActivity]);
 
   return (
     <TopbarAppShell
@@ -272,7 +266,10 @@ export function DashboardView({
         </aside>
       </div>
 
-      <ActivityPanel activity={activity} preferredNetwork={preferredNetwork} />
+      <ActivityPanel
+        preferredNetwork={preferredNetwork}
+        starknetAddress={starknetAddress}
+      />
     </TopbarAppShell>
   );
 }
@@ -534,6 +531,7 @@ function OnchainAssetsPanel({
   balances: LiveBalances;
   preferredNetwork?: string;
 }) {
+  const [open, setOpen] = useState(false);
   const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Testnet";
   const ethAmount = parseNumericValue(balances.eth);
   const ethPriceUsd = parseNumericValue(balances.ethPriceUsd);
@@ -587,16 +585,24 @@ function OnchainAssetsPanel({
 
   return (
     <section>
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="[font-family:var(--font-syne)] text-[24px] font-semibold md:text-[26px]">
-          Your Assets
-        </h3>
-        <Link href="/move" className="text-[12px] font-semibold text-[#3b5bff]">
-          View All <ArrowUpRightMini />
-        </Link>
-      </div>
+      <SectionToggle
+        title="Your Assets"
+        description="Open live wallet and vault balances."
+        open={open}
+        onToggle={() => setOpen((current) => !current)}
+      />
 
-      <div className="overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
+      {open ? (
+        <div className="mt-4 overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
+          <div className="mb-0 flex items-center justify-between border-b border-[#2a303a] px-6 py-4">
+            <h3 className="[font-family:var(--font-syne)] text-[20px] font-semibold md:text-[22px]">
+              Your Assets
+            </h3>
+            <Link href="/move" className="text-[12px] font-semibold text-[#3b5bff]">
+              View All <ArrowUpRightMini />
+            </Link>
+          </div>
+
         <div className="hidden grid-cols-[minmax(0,1.35fr)_120px_140px_minmax(0,1fr)] gap-4 border-b border-[#2a303a] px-6 py-4 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#98a0b4] md:grid">
           <span>Asset</span>
           <span>Network</span>
@@ -609,7 +615,8 @@ function OnchainAssetsPanel({
             <AssetRow key={asset.name} asset={asset as OnchainAsset} />
           ))}
         </div>
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -781,11 +788,16 @@ function PredictionMarketPanel({
 }: {
   getAccessToken: () => Promise<string | null>;
 }) {
+  const [open, setOpen] = useState(false);
   const [featuredMarket, setFeaturedMarket] = useState<DashboardPredictMarket | null>(null);
   const [onchainExecutionLive, setOnchainExecutionLive] = useState(false);
-  const [loadingMarket, setLoadingMarket] = useState(true);
+  const [loadingMarket, setLoadingMarket] = useState(false);
 
   useEffect(() => {
+    if (!open) {
+      return;
+    }
+
     let cancelled = false;
 
     async function loadFeaturedMarket() {
@@ -815,7 +827,20 @@ function PredictionMarketPanel({
     return () => {
       cancelled = true;
     };
-  }, [getAccessToken]);
+  }, [getAccessToken, open]);
+
+  if (!open) {
+    return (
+      <section>
+        <SectionToggle
+          title="Prediction Market"
+          description="Open the 24h market card when you want live prediction data."
+          open={open}
+          onToggle={() => setOpen(true)}
+        />
+      </section>
+    );
+  }
 
   if (loadingMarket && !featuredMarket) {
     return (
@@ -938,6 +963,21 @@ function PredictionMarketPanel({
 }
 
 function SecurityHealthPanel() {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <section>
+        <SectionToggle
+          title="Security Health"
+          description="Open session and recovery status."
+          open={open}
+          onToggle={() => setOpen(true)}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
       <div className="bg-[#111a5b] px-5 py-4">
@@ -971,6 +1011,21 @@ function SecurityRow({ label, value }: { label: string; value: string }) {
 }
 
 function SearchUsersPanel() {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <section>
+        <SectionToggle
+          title="Search Users"
+          description="Open the send shortcut when you want to look up a recipient."
+          open={open}
+          onToggle={() => setOpen(true)}
+        />
+      </section>
+    );
+  }
+
   return (
     <Link
       href="/move?tab=send"
@@ -982,18 +1037,83 @@ function SearchUsersPanel() {
 }
 
 function ActivityPanel({
-  activity,
   preferredNetwork,
+  starknetAddress,
 }: {
-  activity: ActivityItem[];
   preferredNetwork?: "sepolia" | "mainnet";
+  starknetAddress?: string | null;
 }) {
+  const [open, setOpen] = useState(false);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [loading, setLoading] = useState(false);
   const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia";
   const [visibleCount, setVisibleCount] = useState(5);
+
+  const fetchActivity = useCallback(async () => {
+    if (!starknetAddress) {
+      setActivity([]);
+      return;
+    }
+
+    const cacheKey = `${preferredNetwork}:${starknetAddress}`;
+    const cached = activityMemoryCache.get(cacheKey);
+
+    if (cached) {
+      setActivity(cached);
+    }
+
+    try {
+      setLoading(true);
+      const params = new URLSearchParams({
+        address: starknetAddress,
+        network: preferredNetwork ?? "sepolia",
+      });
+      const res = await fetch(`/api/activity?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { activity?: ActivityItem[] };
+        const nextActivity = data.activity ?? [];
+        activityMemoryCache.set(cacheKey, nextActivity);
+        setActivity(nextActivity);
+      }
+    } catch {
+      // Keep the last known activity list on transient RPC failures.
+    } finally {
+      setLoading(false);
+    }
+  }, [preferredNetwork, starknetAddress]);
 
   useEffect(() => {
     setVisibleCount(activity.length);
   }, [activity]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    void fetchActivity();
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      void fetchActivity();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchActivity, open]);
+
+  if (!open) {
+    return (
+      <section className="mt-8">
+        <SectionToggle
+          title="Transaction Tracker"
+          description="Open full wallet activity when you need it."
+          open={open}
+          onToggle={() => setOpen(true)}
+        />
+      </section>
+    );
+  }
 
   const visibleActivity = activity.slice(0, visibleCount);
   const hasMore = activity.length > visibleCount;
@@ -1049,6 +1169,12 @@ function ActivityPanel({
             Full Wallet Activity
           </p>
         </div>
+
+        {loading && activity.length === 0 ? (
+          <div className="px-6 py-6 text-[13px] text-[#8b95ab]">
+            Loading wallet activity...
+          </div>
+        ) : null}
 
         {activity.length > 0 ? (
           <div className="divide-y divide-[#2a303a]">

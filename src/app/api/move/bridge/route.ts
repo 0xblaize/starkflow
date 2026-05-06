@@ -5,6 +5,8 @@ import { withTimeout } from "@/lib/promise-timeout";
 import { BridgeTokenRepository } from "../../../../../node_modules/starkzap/dist/src/bridge/tokens/repository.js";
 
 const bridgeTokenRepository = new BridgeTokenRepository();
+const BRIDGE_UNAVAILABLE_MESSAGE =
+  "Bridge is temporarily unavailable. Swap and wallet actions still work.";
 
 function normalizeBridgeTokenSymbol(symbol: string) {
   const upper = symbol.toUpperCase();
@@ -62,12 +64,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error("[/api/move/bridge][GET]", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load bridge routes.",
-      },
+      { error: BRIDGE_UNAVAILABLE_MESSAGE },
       { status: getPrivyErrorStatus(error) },
     );
   }
