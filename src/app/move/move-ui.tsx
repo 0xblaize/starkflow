@@ -265,6 +265,7 @@ const moveTokenBalanceCache = new Map<
 >();
 const SOLANA_MAINNET_CHAIN_ID = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 const SOLANA_TESTNET_CHAIN_ID = "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
+const SEPOLIA_SWAP_SAFE_SYMBOLS = new Set(["ETH", "USDC", "USDC.e"]);
 let bridgeModulesPromise: Promise<BridgeModules> | null = null;
 
 async function fetchPrivyJson<T>(
@@ -658,6 +659,38 @@ function toStarkzapToken(token: {
     name: token.name,
     symbol: token.symbol,
   };
+}
+
+function filterSwapTokensForNetwork(
+  preferredNetwork: "mainnet" | "sepolia",
+  tokens: MoveTokenOption[],
+) {
+  if (preferredNetwork !== "sepolia") {
+    return tokens;
+  }
+
+  const filtered = tokens.filter((token) =>
+    SEPOLIA_SWAP_SAFE_SYMBOLS.has(token.symbol),
+  );
+
+  return filtered.length ? filtered : tokens;
+}
+
+function formatSwapRouteError(
+  preferredNetwork: "mainnet" | "sepolia",
+  error: unknown,
+) {
+  if (!(error instanceof Error)) {
+    return "Swap request failed.";
+  }
+
+  if (/AVNU quote returned no routes/i.test(error.message)) {
+    return preferredNetwork === "sepolia"
+      ? "AVNU has no live Sepolia route for this pair and amount. Try ETH or USDC on testnet, reduce the amount, or switch to Mainnet."
+      : "AVNU has no live route for this pair and amount. Try a larger amount or another token pair.";
+  }
+
+  return error.message;
 }
 
 async function createConnectedBridgeWallet(
@@ -1418,6 +1451,10 @@ function SwapPanel({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [state, setState] = useState<SubmitState>(null);
+  const swapPickerFilter =
+    preferredNetwork === "sepolia"
+      ? (token: MoveTokenOption) => SEPOLIA_SWAP_SAFE_SYMBOLS.has(token.symbol)
+      : undefined;
 
   async function hydrateTokenBalance(token: MoveTokenOption) {
     const cacheKey = tokenBalanceCacheKey(
@@ -1481,14 +1518,17 @@ function SwapPanel({
           moveTokenListCache.set(cacheKey, payload.tokens);
         }
 
+        const swapTokens = filterSwapTokensForNetwork(preferredNetwork, payload.tokens);
         const defaultIn =
-          payload.tokens.find((token) => token.symbol === "STRK") ??
-          payload.tokens[0] ??
+          swapTokens.find((token) => token.symbol === "ETH") ??
+          swapTokens.find((token) => token.symbol === "STRK") ??
+          swapTokens[0] ??
           null;
         const defaultOut =
-          payload.tokens.find((token) => token.symbol === "USDC") ??
-          payload.tokens.find((token) => token.symbol !== "STRK") ??
-          payload.tokens[1] ??
+          swapTokens.find((token) => token.symbol === "USDC") ??
+          swapTokens.find((token) => token.symbol === "USDC.e") ??
+          swapTokens.find((token) => token.symbol !== defaultIn?.symbol) ??
+          swapTokens[1] ??
           null;
 
         if (!defaultIn || !defaultOut || cancelled) return;
@@ -1570,7 +1610,7 @@ function SwapPanel({
       setQuote(null);
       setState({
         status: "error",
-        error: error instanceof Error ? error.message : "Quote request failed.",
+        error: formatSwapRouteError(preferredNetwork, error),
       });
     } finally {
       setQuoteLoading(false);
@@ -1661,7 +1701,7 @@ function SwapPanel({
     } catch (error) {
       setState({
         status: "error",
-        error: error instanceof Error ? error.message : "Swap failed.",
+        error: formatSwapRouteError(preferredNetwork, error),
       });
     } finally {
       setSubmitLoading(false);
@@ -1696,6 +1736,13 @@ function SwapPanel({
             {preferredNetwork}
           </span>
         </div>
+
+        {preferredNetwork === "sepolia" ? (
+          <div className="mt-4 rounded-[14px] border border-[#2b3a6b] bg-[#0d1530] px-4 py-4 text-[12px] leading-5 text-[#8fa4d8]">
+            Sepolia AVNU liquidity is limited. StarkFlow now keeps testnet swap selection constrained to the
+            most reliable assets, but if you still get no route you need Mainnet for full swap routing.
+          </div>
+        ) : null}
 
         <div className="mt-4 rounded-[14px] border border-[#2a303b] bg-black px-4 py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1789,6 +1836,7 @@ function SwapPanel({
           }}
           open={pickerTarget !== null}
           preferredNetwork={preferredNetwork}
+          tokenFilter={swapPickerFilter}
           title={pickerTarget === "in" ? "Select token to sell" : "Select token to buy"}
         />
     </>
@@ -1866,6 +1914,7 @@ function TokenPickerDialog({
   onSelect,
   open,
   preferredNetwork,
+  tokenFilter,
   title,
 }: {
   getAccessToken: () => Promise<string | null>;
@@ -1874,6 +1923,7 @@ function TokenPickerDialog({
   onSelect: (token: MoveTokenOption) => void;
   open: boolean;
   preferredNetwork: "mainnet" | "sepolia";
+  tokenFilter?: (token: MoveTokenOption) => boolean;
   title: string;
 }) {
   const [query, setQuery] = useState("");
@@ -1913,7 +1963,9 @@ function TokenPickerDialog({
         }
 
         if (!cancelled) {
-          setTokens(payload.tokens);
+          setTokens(
+            tokenFilter ? payload.tokens.filter((token) => tokenFilter(token)) : payload.tokens,
+          );
         }
       } catch (fetchError) {
         if (!cancelled) {
@@ -1934,7 +1986,7 @@ function TokenPickerDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-    }, [getAccessToken, open, preferredNetwork, query]);
+    }, [getAccessToken, open, preferredNetwork, query, tokenFilter]);
 
   if (!open) return null;
 
