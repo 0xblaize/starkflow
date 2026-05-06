@@ -18,6 +18,12 @@ export const tokenTickers = [
     note: "Stable",
   },
   {
+    symbol: "ETH",
+    balance: "0.0000",
+    network: "Testnet",
+    note: "Wallet balance",
+  },
+  {
     symbol: "BTC",
     balance: "0.0000",
     network: "Standby",
@@ -53,6 +59,14 @@ export const onchainAssets = [
     balance: "0.00",
     status: "Stable route empty",
    
+  },
+  {
+    name: "ETHEREUM",
+    symbol: "ETH",
+    iconSrc: "/tokens/eth.svg",
+    network: "Testnet",
+    balance: "0.0000",
+    status: "Waiting for first transfer",
   },
   {
     name: "BITCOIN",

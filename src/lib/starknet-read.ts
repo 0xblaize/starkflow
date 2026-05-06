@@ -27,6 +27,7 @@ type ActivityItem = {
 
 const providerCache = new Map<string, RpcProvider>();
 let strkPriceCache: { fetchedAt: number; priceUsd: number | null } | null = null;
+let ethPriceCache: { fetchedAt: number; priceUsd: number | null } | null = null;
 let btcPriceCache: { fetchedAt: number; priceUsd: number | null } | null = null;
 
 function getProvider(network: Network) {
@@ -45,9 +46,10 @@ function getProvider(network: Network) {
   return provider;
 }
 
-function getTokens(network: Network): { STRK: TokenPreset; USDC: TokenPreset } {
+function getTokens(network: Network): { ETH: TokenPreset; STRK: TokenPreset; USDC: TokenPreset } {
   const presets = network === "mainnet" ? mainnetTokens : sepoliaTokens;
   return {
+    ETH: presets.ETH,
     STRK: presets.STRK,
     USDC: presets.USDC,
   };
@@ -254,6 +256,47 @@ async function getBitcoinUsdPrice() {
   }
 }
 
+async function getEthereumUsdPrice() {
+  if (ethPriceCache && Date.now() - ethPriceCache.fetchedAt < 60_000) {
+    return ethPriceCache.priceUsd;
+  }
+
+  try {
+    const response = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+      {
+        headers: {
+          accept: "application/json",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as {
+      ethereum?: { usd?: number };
+    };
+    const priceUsd =
+      typeof payload?.ethereum?.usd === "number" ? payload.ethereum.usd : null;
+
+    ethPriceCache = {
+      fetchedAt: Date.now(),
+      priceUsd,
+    };
+
+    return priceUsd;
+  } catch (error) {
+    console.error("[starknet-read] failed to fetch ETH/USD price", error);
+    ethPriceCache = {
+      fetchedAt: Date.now(),
+      priceUsd: null,
+    };
+    return null;
+  }
+}
+
 export async function getWalletDeploymentState(
   address: string,
   preferredNetwork?: string | null,
@@ -283,13 +326,18 @@ export async function getReadOnlyWalletBalances(
   const provider = getProvider(network);
   const tokens = getTokens(network);
 
-  const [strkValue, usdcValue, strkPriceUsd, btcPriceUsd] = await Promise.all([
+  const [ethValue, strkValue, usdcValue, ethPriceUsd, strkPriceUsd, btcPriceUsd] = await Promise.all([
+    readTokenBalanceValue(provider, address, tokens.ETH),
     readTokenBalanceValue(provider, address, tokens.STRK),
     readTokenBalanceValue(provider, address, tokens.USDC),
+    getEthereumUsdPrice(),
     getStrkUsdPrice(),
     getBitcoinUsdPrice(),
   ]);
 
+  const ethAmount = ethValue
+    ? formatTokenAmount(ethValue, tokens.ETH.decimals, 4)
+    : "0.0000";
   const strkAmount = strkValue
     ? formatTokenAmount(strkValue, tokens.STRK.decimals, 4)
     : "0.0000";
@@ -297,10 +345,13 @@ export async function getReadOnlyWalletBalances(
     ? formatTokenAmount(usdcValue, tokens.USDC.decimals, 2)
     : "0.00";
 
+  const eth = `${ethAmount} ETH`;
   const strk = `${strkAmount} STRK`;
   const usdc = `${usdcAmount} USDC`;
   const usdTotal =
-    Number(usdcAmount) + (strkPriceUsd ? Number(strkAmount) * strkPriceUsd : 0);
+    Number(usdcAmount) +
+    (ethPriceUsd ? Number(ethAmount) * ethPriceUsd : 0) +
+    (strkPriceUsd ? Number(strkAmount) * strkPriceUsd : 0);
   const portfolioStrkbtc =
     typeof btcPriceUsd === "number" && btcPriceUsd > 0
       ? (usdTotal / btcPriceUsd).toFixed(6)
@@ -308,17 +359,21 @@ export async function getReadOnlyWalletBalances(
 
   return {
     address,
+    eth,
     network,
     strk,
     usdc,
     strkbtc: "0.0000 strkBTC",
     portfolioStrkbtc,
     usdTotal: usdTotal.toFixed(2),
+    ethPriceUsd:
+      typeof ethPriceUsd === "number" ? ethPriceUsd.toFixed(2) : null,
     strkPriceUsd:
       typeof strkPriceUsd === "number" ? strkPriceUsd.toFixed(4) : null,
     btcPriceUsd:
       typeof btcPriceUsd === "number" ? btcPriceUsd.toFixed(2) : null,
     tokenAddresses: {
+      eth: tokens.ETH.address,
       strk: tokens.STRK.address,
       usdc: tokens.USDC.address,
     },

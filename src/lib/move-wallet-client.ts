@@ -51,6 +51,18 @@ type MoveExecutionClient = {
 
 let starkzapModulesPromise: Promise<StarkzapModules> | null = null;
 
+function getBridgeEthereumRpcUrl(network: MoveExecutionSession["network"]) {
+  return network === "mainnet"
+    ? "https://cloudflare-eth.com"
+    : "https://rpc.sepolia.org";
+}
+
+function getBridgeSolanaRpcUrl(network: MoveExecutionSession["network"]) {
+  return network === "mainnet"
+    ? "https://api.mainnet-beta.solana.com"
+    : "https://api.testnet.solana.com";
+}
+
 function getAbsoluteUrl(value: string) {
   if (/^https?:\/\//i.test(value)) {
     return value;
@@ -244,6 +256,10 @@ export async function getMoveExecutionClient(options: {
           : modules.ChainId.SEPOLIA,
       explorer: {
         baseUrl: session.explorerUrl,
+      },
+      bridging: {
+        ethereumRpcUrl: getBridgeEthereumRpcUrl(session.network),
+        solanaRpcUrl: getBridgeSolanaRpcUrl(session.network),
       },
       ...(session.paymasterUrl
         ? {

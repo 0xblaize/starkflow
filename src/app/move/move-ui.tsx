@@ -101,6 +101,12 @@ type DcaPreviewResponse = {
   provider: string;
 };
 
+type DcaListResponse = {
+  network: "mainnet" | "sepolia";
+  orders: DcaOrderSummary[];
+  sepoliaNotice: string | null;
+};
+
 type DcaCreateResponse = {
   explorerUrl: string;
   frequency: string;
@@ -3266,7 +3272,12 @@ function DcaProgramContent({
   MoveCenterViewProps,
   "getAccessToken" | "identityToken" | "preferredNetwork" | "starknetAddress"
 >) {
+  const dcaSepoliaNotice =
+    "DCA execution is not available on Starknet Sepolia. Switch your active side to Mainnet to preview or create recurring buys.";
   const { generateAuthorizationSignature } = useAuthorizationSignature();
+  const [availabilityNotice, setAvailabilityNotice] = useState<string | null>(
+    preferredNetwork === "sepolia" ? dcaSepoliaNotice : null,
+  );
   const [buyToken, setBuyToken] = useState<MoveTokenOption | null>(null);
   const [sellToken, setSellToken] = useState<MoveTokenOption | null>(null);
   const [frequency, setFrequency] = useState("P1D");
@@ -3335,8 +3346,16 @@ function DcaProgramContent({
     }
 
     async function loadStrategies() {
+      if (preferredNetwork === "sepolia") {
+        if (!cancelled) {
+          setStrategies([]);
+          setAvailabilityNotice(dcaSepoliaNotice);
+        }
+        return;
+      }
+
       try {
-        const payload = await fetchPrivyJson<{ orders: DcaOrderSummary[] }>(
+        const payload = await fetchPrivyJson<DcaListResponse>(
           getAccessToken,
           identityToken,
           "/api/move/dca",
@@ -3344,6 +3363,7 @@ function DcaProgramContent({
 
         if (!cancelled) {
           setStrategies(payload.orders);
+          setAvailabilityNotice(payload.sepoliaNotice);
         }
       } catch (error) {
         if (!cancelled) {
@@ -3367,12 +3387,19 @@ function DcaProgramContent({
   }, [getAccessToken, preferredNetwork]);
 
   async function refreshStrategies() {
-    const payload = await fetchPrivyJson<{ orders: DcaOrderSummary[] }>(
+    if (preferredNetwork === "sepolia") {
+      setStrategies([]);
+      setAvailabilityNotice(dcaSepoliaNotice);
+      return [];
+    }
+
+    const payload = await fetchPrivyJson<DcaListResponse>(
       getAccessToken,
       identityToken,
       "/api/move/dca",
     );
     setStrategies(payload.orders);
+    setAvailabilityNotice(payload.sepoliaNotice);
     return payload.orders;
   }
 
@@ -3395,6 +3422,15 @@ function DcaProgramContent({
   }
 
   async function handlePreview() {
+    if (availabilityNotice) {
+      setPreview(null);
+      setState({
+        status: "error",
+        error: availabilityNotice,
+      });
+      return;
+    }
+
     if (!sellToken || !buyToken) {
       setState({
         status: "error",
@@ -3453,6 +3489,14 @@ function DcaProgramContent({
   }
 
   async function handleCreate() {
+    if (availabilityNotice) {
+      setState({
+        status: "error",
+        error: availabilityNotice,
+      });
+      return;
+    }
+
     if (!sellToken || !buyToken) {
       setState({
         status: "error",
@@ -3562,9 +3606,28 @@ function DcaProgramContent({
           </p>
         </div>
         <div className="rounded-full bg-[#101726] px-3 py-2 text-[11px] font-semibold text-[#9fb1ff]">
-          AVNU
+          {availabilityNotice ? "Mainnet only" : "AVNU"}
         </div>
       </div>
+
+      {availabilityNotice ? (
+        <div className="rounded-[14px] border border-[#2b3a6b] bg-[#0d1530] px-4 py-4">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 text-[18px]">🌐</span>
+            <div>
+              <p className="text-[13px] font-semibold text-[#7da6ff]">
+                Mainnet Required for DCA
+              </p>
+              <p className="mt-1 text-[12px] leading-5 text-[#8fa4d8]">
+                {availabilityNotice}
+              </p>
+              <p className="mt-3 text-[11px] text-[#6b7fa8]">
+                Go to <span className="font-semibold text-[#9fb8ff]">Me → Active Side → Mainnet</span> to enable recurring buys.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
         <div>
@@ -3654,7 +3717,7 @@ function DcaProgramContent({
         <button
           type="button"
           onClick={handlePreview}
-          disabled={previewLoading}
+          disabled={previewLoading || Boolean(availabilityNotice)}
           className="h-12 rounded-[12px] border border-[#30458e] bg-[#13255f] text-[14px] font-semibold text-white disabled:opacity-60"
         >
           {previewLoading ? "Previewing..." : "Preview Cycle"}
@@ -3662,7 +3725,7 @@ function DcaProgramContent({
         <button
           type="button"
           onClick={handleCreate}
-          disabled={strategyLoading}
+          disabled={strategyLoading || Boolean(availabilityNotice)}
           className="h-12 rounded-[12px] bg-[#3151ff] text-[14px] font-semibold text-white shadow-[0_14px_40px_rgba(49,81,255,0.26)] disabled:opacity-60"
         >
           {strategyLoading ? "Creating..." : "Create Strategy"}

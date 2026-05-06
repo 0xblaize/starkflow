@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { recordAppTransaction } from "@/lib/app-transactions";
+import { normalizePreferredNetwork } from "@/lib/app-user";
 import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
@@ -11,6 +12,9 @@ import type { Address } from "../../../../../node_modules/starkzap/dist/src/type
 import type { Token } from "../../../../../node_modules/starkzap/dist/src/types/token.js";
 
 type DcaIntent = "preview" | "create";
+
+const DCA_SEPOLIA_NOTICE =
+  "DCA execution is not available on Starknet Sepolia. Switch your active side to Mainnet to preview or create recurring buys.";
 
 function toStarkzapToken(token: {
   address: string;
@@ -89,6 +93,16 @@ export async function GET(req: NextRequest) {
     const claims = await verifyPrivyToken(req);
     const userJwts = getPrivyWalletJwts(req);
     const user = await getOrCreatePrivyUser(claims);
+    const network = normalizePreferredNetwork(user.preferredNetwork);
+
+    if (network === "sepolia") {
+      return NextResponse.json({
+        network,
+        orders: [],
+        sepoliaNotice: DCA_SEPOLIA_NOTICE,
+      });
+    }
+
     const flow = await initStarkFlow(user.id, userJwts, { deploy: "never" });
     const liveOrders = await flow.wallet.dca().getOrders({
       size: 20,
@@ -164,6 +178,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       network: flow.network,
       orders: mappedOrders,
+      sepoliaNotice: null,
     });
   } catch (error) {
     console.error("[/api/move/dca][GET]", error);
@@ -184,6 +199,7 @@ export async function POST(req: NextRequest) {
     const claims = await verifyPrivyToken(req);
     const userJwts = getPrivyWalletJwts(req);
     const user = await getOrCreatePrivyUser(claims);
+    const network = normalizePreferredNetwork(user.preferredNetwork);
     const body = (await req.json()) as {
       buyTokenAddress?: string;
       frequency?: string;
@@ -195,6 +211,13 @@ export async function POST(req: NextRequest) {
       sellTokenAddress?: string;
       slippageBps?: number;
     };
+
+    if (network === "sepolia") {
+      return NextResponse.json(
+        { error: DCA_SEPOLIA_NOTICE },
+        { status: 409 },
+      );
+    }
 
     const intent = body.intent ?? "preview";
     const sellTokenAddress = body.sellTokenAddress?.trim();

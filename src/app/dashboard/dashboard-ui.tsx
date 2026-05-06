@@ -27,6 +27,8 @@ type DashboardViewProps = {
 
 type LiveBalances = {
   address?: string | null;
+  eth?: string;
+  ethPriceUsd?: string | null;
   gasSavedDisplay?: string;
   gasSavedUsd?: string;
   fetchedAt?: number;
@@ -43,14 +45,30 @@ type LiveBalances = {
 
 type ActivityItem = {
   amount: string;
-  blockNumber: number;
+  badge?: string;
+  badgeTone?: "brand" | "neutral" | "positive" | "negative";
+  blockNumber: number | null;
   counterpartyAddress?: string;
   counterpartyLabel?: string;
   contractAddress: string;
+  createdAt?: string;
+  label?: string;
+  meta?: string;
   direction: "received" | "sent";
   fromAddress?: string;
   id: string;
-  kind?: "deposit" | "internal_transfer" | "transfer";
+  kind?:
+    | "deposit"
+    | "internal_transfer"
+    | "transfer"
+    | "send"
+    | "swap"
+    | "yield_deposit"
+    | "yield_withdraw"
+    | "predict_place"
+    | "predict_claim"
+    | "dca_create"
+    | "dca_cancel";
   symbol: string;
   toAddress?: string;
   txHash: string;
@@ -110,6 +128,8 @@ export function DashboardView({
   user,
 }: DashboardViewProps) {
   const [balances, setBalances] = useState<LiveBalances>({
+    eth: "0.0000 ETH",
+    ethPriceUsd: null,
     strk: "—",
     usdc: "—",
     strkbtc: "—",
@@ -124,6 +144,8 @@ export function DashboardView({
     if (!starknetAddress) {
       setBalances({
         address: null,
+        eth: "0.0000 ETH",
+        ethPriceUsd: null,
         gasSavedDisplay: "$0.00",
         gasSavedUsd: "0.000000",
         network: preferredNetwork,
@@ -456,7 +478,7 @@ function TopHero({
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[12px] font-medium text-[#c5d0ff]">
-                Gas Saved (lifetime)
+                Gas Saved
               </p>
               <p className="mt-2 [font-family:var(--font-syne)] text-[42px] leading-none tracking-[-0.04em]">
                 {balances.gasSavedDisplay ?? "$0.00"}
@@ -468,10 +490,10 @@ function TopHero({
           </div>
           <div className="mt-5 border-t border-white/10 pt-4">
             <p className="text-[13px] text-[#c5d0ff]">
-              Calculated from tracked Starknet app transaction receipts.
+              Estimated across your StarkFlow onchain activity.
             </p>
             <p className="mt-1 text-[12px] text-[#99acff]">
-              {balances.trackedTransactionCount ?? 0} transaction
+              {balances.trackedTransactionCount ?? 0} wallet action
               {(balances.trackedTransactionCount ?? 0) === 1 ? "" : "s"} accounted.
             </p>
           </div>
@@ -513,6 +535,8 @@ function OnchainAssetsPanel({
   preferredNetwork?: string;
 }) {
   const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Testnet";
+  const ethAmount = parseNumericValue(balances.eth);
+  const ethPriceUsd = parseNumericValue(balances.ethPriceUsd);
   const strkAmount = parseNumericValue(balances.strk);
   const usdcAmount = parseNumericValue(balances.usdc);
   const strkPriceUsd = parseNumericValue(balances.strkPriceUsd);
@@ -528,7 +552,7 @@ function OnchainAssetsPanel({
         network: netLabel,
         status:
           strkAmount > 0 && strkPriceUsd > 0
-            ? `${formatUsdValue(strkAmount * strkPriceUsd)} tracked value`
+            ? `${formatUsdValue(strkAmount * strkPriceUsd)} live value`
             : asset.status,
       };
     if (asset.symbol === "USDC")
@@ -538,7 +562,17 @@ function OnchainAssetsPanel({
         network: netLabel,
         status:
           usdcAmount > 0
-            ? `${formatUsdValue(usdcAmount)} stable value`
+            ? `${formatUsdValue(usdcAmount)} live value`
+            : asset.status,
+      };
+    if (asset.symbol === "ETH")
+      return {
+        ...asset,
+        balance: balances.eth?.split(" ")[0] ?? asset.balance,
+        network: netLabel,
+        status:
+          ethAmount > 0 && ethPriceUsd > 0
+            ? `${formatUsdValue(ethAmount * ethPriceUsd)} live value`
             : asset.status,
       };
     if (asset.symbol === "strkBTC")
@@ -964,6 +998,45 @@ function ActivityPanel({
   const visibleActivity = activity.slice(0, visibleCount);
   const hasMore = activity.length > visibleCount;
 
+  function getFallbackLabel(item: ActivityItem) {
+    if (item.kind === "internal_transfer") {
+      return item.direction === "received"
+        ? `Transfer from ${item.counterpartyLabel ?? "another StarkFlow user"}`
+        : `Transfer to ${item.counterpartyLabel ?? "another StarkFlow user"}`;
+    }
+
+    return item.direction === "received"
+      ? `Received ${item.amount} ${item.symbol}`
+      : `Sent ${item.amount} ${item.symbol}`;
+  }
+
+  function getFallbackMeta(item: ActivityItem) {
+    const directionLabel = item.direction === "received" ? "From" : "To";
+    return [
+      item.blockNumber != null ? `Block #${item.blockNumber}` : null,
+      `${directionLabel} ${item.counterpartyLabel ?? "Unknown counterparty"}`,
+      `Tx ${item.txHash.slice(0, 12)}...`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function getBadgeClass(item: ActivityItem) {
+    if (item.badgeTone === "brand") {
+      return "bg-[#14274d] text-[#8fb3ff]";
+    }
+
+    if (item.badgeTone === "positive") {
+      return "bg-[#13301f] text-[#6df5a0]";
+    }
+
+    if (item.badgeTone === "negative") {
+      return "bg-[#35171a] text-[#ff9599]";
+    }
+
+    return "bg-[#232936] text-[#d0d6e4]";
+  }
+
   return (
     <section className="mt-8">
       <h3 className="[font-family:var(--font-syne)] text-[24px] font-semibold md:text-[26px]">
@@ -986,36 +1059,21 @@ function ActivityPanel({
               >
                 <div className="min-w-0">
                   <p className="text-[15px] font-semibold text-white">
-                    {item.kind === "internal_transfer"
-                      ? item.direction === "received"
-                        ? `Received from ${item.counterpartyLabel ?? "another StarkFlow user"}`
-                        : `Sent to ${item.counterpartyLabel ?? "another StarkFlow user"}`
-                      : item.direction === "received"
-                        ? `Received from ${item.counterpartyLabel ?? "an onchain wallet"}`
-                        : `Sent to ${item.counterpartyLabel ?? "an onchain wallet"}`}{" "}
-                    · {item.amount} {item.symbol}
+                    {item.label ?? getFallbackLabel(item)}
                   </p>
                   <p className="mt-1 truncate text-[12px] text-[#8b95ab]">
-                    {networkLabel} · Block #{item.blockNumber} ·{" "}
-                    {item.direction === "received" ? "From" : "To"}{" "}
-                    {item.counterpartyLabel ?? "Unknown counterparty"} · Tx{" "}
-                    {item.txHash.slice(0, 12)}...
+                    {networkLabel} · {item.meta ?? getFallbackMeta(item)}
                   </p>
                 </div>
                 <span
-                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold ${
-                    item.kind === "internal_transfer"
-                      ? "bg-[#14274d] text-[#8fb3ff]"
-                      : item.direction === "received"
-                        ? "bg-[#13301f] text-[#6df5a0]"
-                        : "bg-[#35171a] text-[#ff9599]"
-                  }`}
+                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold ${getBadgeClass(item)}`}
                 >
-                  {item.kind === "internal_transfer"
-                    ? "StarkFlow"
-                    : item.direction === "received"
-                      ? "Incoming"
-                      : "Outgoing"}
+                  {item.badge ??
+                    (item.kind === "internal_transfer"
+                      ? "Transfer"
+                      : item.direction === "received"
+                        ? "Incoming"
+                        : "Outgoing")}
                 </span>
               </div>
             ))}

@@ -46,6 +46,7 @@ export const SWAP_PROVIDER_OPTIONS: Array<{
 ];
 
 const NO_ROUTE_PATTERN = /AVNU quote returned no routes|NO_ROUTE|no routes|no route/i;
+const LIQUIDITY_PATTERN = /insufficient liquidity/i;
 
 function toError(error: unknown) {
   if (error instanceof Error) {
@@ -66,7 +67,6 @@ function buildAutoFallbackMessage(
   primaryError: unknown,
   fallbackError: unknown,
 ) {
-  const normalizedPrimary = toError(primaryError);
   const normalizedFallback = toError(fallbackError);
 
   if (isNoRouteSwapError(normalizedFallback)) {
@@ -75,13 +75,21 @@ function buildAutoFallbackMessage(
     );
   }
 
-  return new Error(
-    `StarkZap / AVNU returned no route, and Ekubo fallback failed: ${normalizedFallback.message}`,
-  );
+  if (isLiquiditySwapError(normalizedFallback)) {
+    return new Error(
+      "This pair does not have enough liquidity right now. Try a smaller amount or another token pair.",
+    );
+  }
+
+  return new Error("Swap routing failed on both providers. Try again or switch the provider mode.");
 }
 
 export function isNoRouteSwapError(error: unknown) {
   return NO_ROUTE_PATTERN.test(toError(error).message);
+}
+
+export function isLiquiditySwapError(error: unknown) {
+  return LIQUIDITY_PATTERN.test(toError(error).message);
 }
 
 export function getSwapProviderLabel(
@@ -100,6 +108,9 @@ export function formatSwapModeError(
   const normalized = toError(error);
 
   if (providerMode === "AUTO") {
+    if (isLiquiditySwapError(normalized)) {
+      return "This pair does not have enough liquidity right now. Try a smaller amount or another token pair.";
+    }
     return normalized.message;
   }
 
@@ -107,8 +118,16 @@ export function formatSwapModeError(
     return "StarkZap / AVNU returned no route for this pair and amount. Switch to Auto to try Ekubo fallback, or change the amount or pair.";
   }
 
+  if (providerMode === "STARKZAP_AVNU" && isLiquiditySwapError(normalized)) {
+    return "This pair does not have enough liquidity on StarkZap / AVNU right now. Try a smaller amount, another pair, or switch to Auto.";
+  }
+
   if (providerMode === "FALLBACK_EKUBO" && isNoRouteSwapError(normalized)) {
     return "Ekubo returned no route for this pair and amount. Switch to Auto or StarkZap / AVNU, or change the amount or pair.";
+  }
+
+  if (providerMode === "FALLBACK_EKUBO" && isLiquiditySwapError(normalized)) {
+    return "This pair does not have enough liquidity on Ekubo right now. Try a smaller amount, another pair, or switch providers.";
   }
 
   return normalized.message;

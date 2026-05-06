@@ -59,6 +59,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         {
           address: null,
+          eth: "0.0000 ETH",
+          ethPriceUsd: null,
           btcPriceUsd: null,
           gasSavedDisplay: emptyGasSummary.display,
           gasSavedUsd: emptyGasSummary.totalUsd.toFixed(6),

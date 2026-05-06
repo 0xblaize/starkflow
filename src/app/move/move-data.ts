@@ -9,10 +9,10 @@ export type MoveTab = (typeof moveTabs)[number];
 export const programs = [
   {
     title: "DCA Strategy",
-    badge: "Live",
+    badge: "Mainnet",
     description:
-      "Create recurring Starknet buys through StarkZap and keep the live strategy ID synced to your profile data.",
-    footer: "AVNU DCA execution on the active Starknet network",
+      "Create recurring Starknet buys through StarkZap on Mainnet and keep the live strategy ID synced to your profile data.",
+    footer: "AVNU DCA execution on Starknet Mainnet",
     icon: "dca",
   },
   {
