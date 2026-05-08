@@ -408,10 +408,12 @@ export function PredictView({
     >
       <DesktopHero
         activeHedges={summary.activeHedgesDisplay}
+        networkLabel={preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia"}
         totalVolume={summary.totalVolumeDisplay}
       />
       <MobileSummary
         activeHedges={summary.activeHedgesDisplay}
+        networkLabel={preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia"}
         totalVolume={summary.totalVolumeDisplay}
       />
 
@@ -489,9 +491,11 @@ export function PredictView({
 
 function DesktopHero({
   activeHedges,
+  networkLabel,
   totalVolume,
 }: {
   activeHedges: string;
+  networkLabel: string;
   totalVolume: string;
 }) {
   return (
@@ -512,7 +516,7 @@ function DesktopHero({
           </p>
 
           <div className="mt-8 grid max-w-[460px] gap-7 sm:grid-cols-2">
-            <HeroStat label="Market Volume" value={totalVolume} />
+            <HeroStat label={`${networkLabel} Volume`} value={totalVolume} />
             <HeroStat label="My Open Hedges" value={activeHedges} />
           </div>
         </div>
@@ -527,15 +531,17 @@ function DesktopHero({
 
 function MobileSummary({
   activeHedges,
+  networkLabel,
   totalVolume,
 }: {
   activeHedges: string;
+  networkLabel: string;
   totalVolume: string;
 }) {
   return (
     <section className="md:hidden">
       <div className="grid grid-cols-2 gap-3">
-        <SummaryCard label="Market Volume" value={totalVolume} />
+        <SummaryCard label={`${networkLabel} Volume`} value={totalVolume} />
         <SummaryCard label="My Open Hedges" value={activeHedges} />
       </div>
     </section>
@@ -625,7 +631,7 @@ function MarketCard({
                 value={market.targetPriceDisplay}
               />
               <MarketMetric
-                label="Tracked Volume"
+                label={market.timeframe.includes("24h") ? "Side Volume" : "Tracked Volume"}
                 value={market.totalVolumeDisplay}
               />
             </div>

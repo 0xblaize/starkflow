@@ -370,6 +370,7 @@ export function MeView({
         updatePreferredNetworkAction={updatePreferredNetworkAction}
         user={user}
         activeNetwork={activeNetwork}
+        preferredNetwork={user.preferredNetwork === "mainnet" ? "mainnet" : "sepolia"}
         dcaStrategies={portfolio?.dcaStrategies ?? []}
         managedActionState={managedActionState}
         onManagedAction={handleManagedAction}
@@ -391,6 +392,7 @@ export function MeView({
         updatePreferredNetworkAction={updatePreferredNetworkAction}
         user={user}
         activeNetwork={activeNetwork}
+        preferredNetwork={user.preferredNetwork === "mainnet" ? "mainnet" : "sepolia"}
         dcaStrategies={portfolio?.dcaStrategies ?? []}
         managedActionState={managedActionState}
         onManagedAction={handleManagedAction}
@@ -414,6 +416,7 @@ function DesktopPersonalHub({
   updatePreferredNetworkAction,
   user,
   activeNetwork,
+  preferredNetwork,
   dcaStrategies,
   managedActionState,
   onManagedAction,
@@ -433,6 +436,7 @@ function DesktopPersonalHub({
   updatePreferredNetworkAction: (formData: FormData) => Promise<void>;
   user: MeViewProps["user"];
   activeNetwork: string;
+  preferredNetwork: "mainnet" | "sepolia";
   dcaStrategies: MeDcaStrategy[];
   managedActionState: ManagedActionState;
   onManagedAction: (
@@ -518,6 +522,7 @@ function DesktopPersonalHub({
 
         <div className="space-y-6">
           <ManagedPositionsPanel
+            preferredNetwork={preferredNetwork}
             dcaStrategies={dcaStrategies}
             managedActionState={managedActionState}
             onManagedAction={onManagedAction}
@@ -562,6 +567,7 @@ function MobilePersonalHub({
   updatePreferredNetworkAction,
   user,
   activeNetwork,
+  preferredNetwork,
   dcaStrategies,
   managedActionState,
   onManagedAction,
@@ -580,6 +586,7 @@ function MobilePersonalHub({
   updatePreferredNetworkAction: (formData: FormData) => Promise<void>;
   user: MeViewProps["user"];
   activeNetwork: string;
+  preferredNetwork: "mainnet" | "sepolia";
   dcaStrategies: MeDcaStrategy[];
   managedActionState: ManagedActionState;
   onManagedAction: (
@@ -661,11 +668,12 @@ function MobilePersonalHub({
       </section>
 
       <div className="mt-4">
-        <ManagedPositionsPanel
-          compact
-          dcaStrategies={dcaStrategies}
-          managedActionState={managedActionState}
-          onManagedAction={onManagedAction}
+      <ManagedPositionsPanel
+        compact
+        preferredNetwork={preferredNetwork}
+        dcaStrategies={dcaStrategies}
+        managedActionState={managedActionState}
+        onManagedAction={onManagedAction}
           pendingActionKey={pendingActionKey}
           portfolioError={portfolioError}
           portfolioLoading={portfolioLoading}
@@ -898,6 +906,7 @@ function Avatar({
 
 function ManagedPositionsPanel({
   compact,
+  preferredNetwork,
   dcaStrategies,
   managedActionState,
   onManagedAction,
@@ -909,6 +918,7 @@ function ManagedPositionsPanel({
   yieldPositions,
 }: {
   compact?: boolean;
+  preferredNetwork: "mainnet" | "sepolia";
   dcaStrategies: MeDcaStrategy[];
   managedActionState: ManagedActionState;
   onManagedAction: (
@@ -941,6 +951,43 @@ function ManagedPositionsPanel({
   yieldError: string | null;
   yieldPositions: MeYieldPosition[];
 }) {
+  const isMainnet = preferredNetwork === "mainnet";
+  const focusLabel = isMainnet ? "Mainnet Focus" : "Sepolia Focus";
+  const focusCopy = isMainnet
+    ? "Mainnet is best for DCA and yield execution. Prediction history here is scoped to your mainnet side."
+    : "Sepolia is best for prediction escrow testing. Prediction history here is scoped to your testnet side.";
+  const predictionCard = (
+    <PredictionPositionsCard
+      key="prediction"
+      preferredNetwork={preferredNetwork}
+      onManagedAction={onManagedAction}
+      pendingActionKey={pendingActionKey}
+      positions={predictionPositions}
+    />
+  );
+  const dcaCard = (
+    <DcaStrategiesCard
+      key="dca"
+      preferredNetwork={preferredNetwork}
+      onManagedAction={onManagedAction}
+      pendingActionKey={pendingActionKey}
+      strategies={dcaStrategies}
+    />
+  );
+  const yieldCard = (
+    <YieldPositionsCard
+      key="yield"
+      preferredNetwork={preferredNetwork}
+      error={yieldError}
+      onManagedAction={onManagedAction}
+      pendingActionKey={pendingActionKey}
+      positions={yieldPositions}
+    />
+  );
+  const orderedCards = isMainnet
+    ? [dcaCard, yieldCard, predictionCard]
+    : [predictionCard, dcaCard, yieldCard];
+
   return (
     <section className="rounded-[20px] border border-[#272c35] bg-[#1a1e25] px-5 py-5">
       <div className="flex items-center justify-between gap-3">
@@ -953,9 +1000,11 @@ function ManagedPositionsPanel({
           </h2>
         </div>
         <span className="rounded-full bg-[#202636] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb9d6]">
-          Live
+          {focusLabel}
         </span>
       </div>
+
+      <p className="mt-3 text-[12px] leading-6 text-[#8e97aa]">{focusCopy}</p>
 
       {portfolioError ? (
         <div className="mt-5 rounded-[14px] border border-[#5e2626] bg-[#241313] px-4 py-3 text-[13px] text-[#ffb4b4]">
@@ -1030,22 +1079,7 @@ function ManagedPositionsPanel({
         </div>
       ) : (
         <div className={`mt-5 grid gap-4 ${compact ? "" : "xl:grid-cols-3"}`}>
-          <PredictionPositionsCard
-            onManagedAction={onManagedAction}
-            pendingActionKey={pendingActionKey}
-            positions={predictionPositions}
-          />
-          <DcaStrategiesCard
-            onManagedAction={onManagedAction}
-            pendingActionKey={pendingActionKey}
-            strategies={dcaStrategies}
-          />
-          <YieldPositionsCard
-            error={yieldError}
-            onManagedAction={onManagedAction}
-            pendingActionKey={pendingActionKey}
-            positions={yieldPositions}
-          />
+          {orderedCards}
         </div>
       )}
     </section>
@@ -1053,10 +1087,12 @@ function ManagedPositionsPanel({
 }
 
 function PredictionPositionsCard({
+  preferredNetwork,
   onManagedAction,
   pendingActionKey,
   positions,
 }: {
+  preferredNetwork: "mainnet" | "sepolia";
   onManagedAction: (
     actionKey: string,
     options: {
@@ -1069,13 +1105,20 @@ function PredictionPositionsCard({
 }) {
   return (
     <section className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
-        Prediction Book
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+          Prediction Book
+        </p>
+        <span className="rounded-full bg-[#132a46] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#97c2ff]">
+          {preferredNetwork === "mainnet" ? "Mainnet side" : "Testnet best"}
+        </span>
+      </div>
       <div className="mt-4 space-y-3">
         {positions.length === 0 ? (
           <p className="text-[12px] leading-6 text-[#8e97aa]">
-            No prediction positions yet.
+            {preferredNetwork === "mainnet"
+              ? "No mainnet prediction positions yet."
+              : "No testnet prediction positions yet."}
           </p>
         ) : (
           positions.slice(0, 5).map((position) => (
@@ -1159,10 +1202,12 @@ function PredictionPositionsCard({
 }
 
 function DcaStrategiesCard({
+  preferredNetwork,
   onManagedAction,
   pendingActionKey,
   strategies,
 }: {
+  preferredNetwork: "mainnet" | "sepolia";
   onManagedAction: (
     actionKey: string,
     options: {
@@ -1175,13 +1220,20 @@ function DcaStrategiesCard({
 }) {
   return (
     <section className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
-        DCA Strategies
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+          DCA Strategies
+        </p>
+        <span className="rounded-full bg-[#202636] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#b7c2dc]">
+          {preferredNetwork === "mainnet" ? "Mainnet best" : "Mainnet only"}
+        </span>
+      </div>
       <div className="mt-4 space-y-3">
         {strategies.length === 0 ? (
           <p className="text-[12px] leading-6 text-[#8e97aa]">
-            No DCA strategies created yet.
+            {preferredNetwork === "mainnet"
+              ? "No mainnet DCA strategies created yet."
+              : "No DCA strategies yet. Switch to mainnet to create one."}
           </p>
         ) : (
           strategies.slice(0, 5).map((strategy) => (
@@ -1247,11 +1299,13 @@ function DcaStrategiesCard({
 }
 
 function YieldPositionsCard({
+  preferredNetwork,
   error,
   onManagedAction,
   pendingActionKey,
   positions,
 }: {
+  preferredNetwork: "mainnet" | "sepolia";
   error: string | null;
   onManagedAction: (
     actionKey: string,
@@ -1272,15 +1326,22 @@ function YieldPositionsCard({
 }) {
   return (
     <section className="rounded-[16px] border border-[#272c35] bg-[#14181f] px-4 py-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
-        Yield Positions
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8f99af]">
+          Yield Positions
+        </p>
+        <span className="rounded-full bg-[#202636] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#b7c2dc]">
+          {preferredNetwork === "mainnet" ? "Mainnet best" : "View only"}
+        </span>
+      </div>
       <div className="mt-4 space-y-3">
         {error ? (
           <p className="text-[12px] leading-6 text-[#ffb4b4]">{error}</p>
         ) : positions.length === 0 ? (
           <p className="text-[12px] leading-6 text-[#8e97aa]">
-            No live yield positions found.
+            {preferredNetwork === "mainnet"
+              ? "No live mainnet yield positions found."
+              : "No live yield positions found on this side."}
           </p>
         ) : (
           positions.slice(0, 5).map((position, index) => (

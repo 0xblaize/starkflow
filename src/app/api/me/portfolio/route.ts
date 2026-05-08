@@ -95,7 +95,10 @@ export async function GET(req: NextRequest) {
     const [predictionBets, dcaStrategies] = await Promise.all([
       withTimeout(
         prisma.predictionBet.findMany({
-          where: { userId: user.id },
+          where: {
+            userId: user.id,
+            network: user.preferredNetwork === "mainnet" ? "mainnet" : "sepolia",
+          },
           orderBy: { createdAt: "desc" },
           take: 20,
           select: {

@@ -119,38 +119,6 @@ function formatUsdValue(value: number) {
   })}`;
 }
 
-function SectionToggle({
-  description,
-  open,
-  title,
-  onToggle,
-}: {
-  description?: string;
-  open: boolean;
-  title: string;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex w-full items-center justify-between gap-4 rounded-[16px] border border-[#2a303a] bg-[#171b22] px-5 py-4 text-left transition hover:border-[#3151ff]"
-    >
-      <div>
-        <p className="[font-family:var(--font-syne)] text-[20px] font-semibold text-white md:text-[22px]">
-          {title}
-        </p>
-        {description ? (
-          <p className="mt-1 text-[13px] text-[#8b95ab]">{description}</p>
-        ) : null}
-      </div>
-      <span className="rounded-full border border-[#313644] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#bfc7da]">
-        {open ? "Hide" : "Open"}
-      </span>
-    </button>
-  );
-}
-
 export function DashboardView({
   signOutAction,
   starknetAddress,
@@ -531,7 +499,6 @@ function OnchainAssetsPanel({
   balances: LiveBalances;
   preferredNetwork?: string;
 }) {
-  const [open, setOpen] = useState(false);
   const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Testnet";
   const ethAmount = parseNumericValue(balances.eth);
   const ethPriceUsd = parseNumericValue(balances.ethPriceUsd);
@@ -584,39 +551,28 @@ function OnchainAssetsPanel({
   });
 
   return (
-    <section>
-      <SectionToggle
-        title="Your Assets"
-        description="Open live wallet and vault balances."
-        open={open}
-        onToggle={() => setOpen((current) => !current)}
-      />
+    <section className="overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
+      <div className="mb-0 flex items-center justify-between border-b border-[#2a303a] px-6 py-4">
+        <h3 className="[font-family:var(--font-syne)] text-[20px] font-semibold md:text-[22px]">
+          Your Assets
+        </h3>
+        <Link href="/move" className="text-[12px] font-semibold text-[#3b5bff]">
+          View All <ArrowUpRightMini />
+        </Link>
+      </div>
 
-      {open ? (
-        <div className="mt-4 overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
-          <div className="mb-0 flex items-center justify-between border-b border-[#2a303a] px-6 py-4">
-            <h3 className="[font-family:var(--font-syne)] text-[20px] font-semibold md:text-[22px]">
-              Your Assets
-            </h3>
-            <Link href="/move" className="text-[12px] font-semibold text-[#3b5bff]">
-              View All <ArrowUpRightMini />
-            </Link>
-          </div>
+      <div className="hidden grid-cols-[minmax(0,1.35fr)_120px_140px_minmax(0,1fr)] gap-4 border-b border-[#2a303a] px-6 py-4 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#98a0b4] md:grid">
+        <span>Asset</span>
+        <span>Network</span>
+        <span>Balance</span>
+        <span>State</span>
+      </div>
 
-        <div className="hidden grid-cols-[minmax(0,1.35fr)_120px_140px_minmax(0,1fr)] gap-4 border-b border-[#2a303a] px-6 py-4 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#98a0b4] md:grid">
-          <span>Asset</span>
-          <span>Network</span>
-          <span>Balance</span>
-          <span>State</span>
-        </div>
-
-        <div className="divide-y divide-[#2a303a]">
-          {liveAssets.map((asset) => (
-            <AssetRow key={asset.name} asset={asset as OnchainAsset} />
-          ))}
-        </div>
-        </div>
-      ) : null}
+      <div className="divide-y divide-[#2a303a]">
+        {liveAssets.map((asset) => (
+          <AssetRow key={asset.name} asset={asset as OnchainAsset} />
+        ))}
+      </div>
     </section>
   );
 }
@@ -788,16 +744,11 @@ function PredictionMarketPanel({
 }: {
   getAccessToken: () => Promise<string | null>;
 }) {
-  const [open, setOpen] = useState(false);
   const [featuredMarket, setFeaturedMarket] = useState<DashboardPredictMarket | null>(null);
   const [onchainExecutionLive, setOnchainExecutionLive] = useState(false);
   const [loadingMarket, setLoadingMarket] = useState(false);
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-
     let cancelled = false;
 
     async function loadFeaturedMarket() {
@@ -827,20 +778,7 @@ function PredictionMarketPanel({
     return () => {
       cancelled = true;
     };
-  }, [getAccessToken, open]);
-
-  if (!open) {
-    return (
-      <section>
-        <SectionToggle
-          title="Prediction Market"
-          description="Open the 24h market card when you want live prediction data."
-          open={open}
-          onToggle={() => setOpen(true)}
-        />
-      </section>
-    );
-  }
+  }, [getAccessToken]);
 
   if (loadingMarket && !featuredMarket) {
     return (
@@ -963,21 +901,6 @@ function PredictionMarketPanel({
 }
 
 function SecurityHealthPanel() {
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <section>
-        <SectionToggle
-          title="Security Health"
-          description="Open session and recovery status."
-          open={open}
-          onToggle={() => setOpen(true)}
-        />
-      </section>
-    );
-  }
-
   return (
     <section className="overflow-hidden rounded-[20px] border border-[#272c35] bg-[#1f232b]">
       <div className="bg-[#111a5b] px-5 py-4">
@@ -1011,21 +934,6 @@ function SecurityRow({ label, value }: { label: string; value: string }) {
 }
 
 function SearchUsersPanel() {
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <section>
-        <SectionToggle
-          title="Search Users"
-          description="Open the send shortcut when you want to look up a recipient."
-          open={open}
-          onToggle={() => setOpen(true)}
-        />
-      </section>
-    );
-  }
-
   return (
     <Link
       href="/move?tab=send"
@@ -1043,7 +951,6 @@ function ActivityPanel({
   preferredNetwork?: "sepolia" | "mainnet";
   starknetAddress?: string | null;
 }) {
-  const [open, setOpen] = useState(false);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(false);
   const networkLabel = preferredNetwork === "mainnet" ? "Mainnet" : "Sepolia";
@@ -1090,30 +997,13 @@ function ActivityPanel({
   }, [activity]);
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-
     void fetchActivity();
     const interval = setInterval(() => {
       if (document.hidden) return;
       void fetchActivity();
     }, 30_000);
     return () => clearInterval(interval);
-  }, [fetchActivity, open]);
-
-  if (!open) {
-    return (
-      <section className="mt-8">
-        <SectionToggle
-          title="Transaction Tracker"
-          description="Open full wallet activity when you need it."
-          open={open}
-          onToggle={() => setOpen(true)}
-        />
-      </section>
-    );
-  }
+  }, [fetchActivity]);
 
   const visibleActivity = activity.slice(0, visibleCount);
   const hasMore = activity.length > visibleCount;

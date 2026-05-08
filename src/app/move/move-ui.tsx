@@ -3224,7 +3224,7 @@ function ProgramPanel({
   program: ProgramCard;
   starknetAddress: string | null;
 }) {
-  const [open, setOpen] = useState(program.icon === "yield");
+  const [open, setOpen] = useState(false);
 
   return (
     <section className="rounded-[20px] border border-[#272c35] bg-[#1f232b] px-5 py-6">
