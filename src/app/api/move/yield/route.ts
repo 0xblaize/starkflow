@@ -4,12 +4,7 @@ import { getPrivyErrorStatus, getPrivyWalletJwts, verifyPrivyToken } from "@/lib
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { findMoveTokenByAddress } from "@/lib/move-tokens";
 import { initStarkFlow } from "@/lib/starkflow-init";
-import { Amount } from "../../../../../node_modules/starkzap/dist/src/types/amount.js";
-import type {
-  LendingMarket,
-  LendingUserPosition,
-} from "../../../../../node_modules/starkzap/dist/src/lending/interface.js";
-import type { Token } from "../../../../../node_modules/starkzap/dist/src/types/token.js";
+import { Amount, type LendingMarket, type LendingUserPosition, type Token } from "starkzap";
 
 function toTokenSummary(token: Token) {
   return {

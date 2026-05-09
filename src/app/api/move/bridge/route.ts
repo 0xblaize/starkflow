@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPrivyErrorStatus, verifyPrivyToken } from "@/lib/privy-server";
 import { getOrCreatePrivyUser } from "@/lib/privy-user";
 import { withTimeout } from "@/lib/promise-timeout";
-import { BridgeTokenRepository } from "../../../../../node_modules/starkzap/dist/src/bridge/tokens/repository.js";
+import { BridgeTokenRepository } from "starkzap";
 
 const bridgeTokenRepository = new BridgeTokenRepository();
 const BRIDGE_UNAVAILABLE_MESSAGE =
