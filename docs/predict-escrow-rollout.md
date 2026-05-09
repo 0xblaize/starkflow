@@ -76,6 +76,19 @@ Add these after the escrow contract is deployed:
 NEXT_PUBLIC_PREDICT_ESCROW_ADDRESS=0x...
 NEXT_PUBLIC_PREDICT_COLLATERAL_TOKEN_ADDRESS=0x...
 PREDICT_ESCROW_RESOLVER_ADDRESS=0x...
+PREDICT_ESCROW_RESOLVER_ACCOUNT_ADDRESS=0x...
+PREDICT_ESCROW_RESOLVER_PRIVATE_KEY=0x...
+```
+
+## Scheduler secrets
+
+The app no longer depends on Vercel Cron. GitHub Actions calls the settle route directly.
+
+Add these GitHub repository secrets:
+
+```text
+PREDICT_SETTLE_URL=https://your-production-domain/api/predict/settle
+PREDICT_SETTLE_CRON_SECRET=<same value as CRON_SECRET in Vercel env>
 ```
 
 ## What still needs to be wired in app code
@@ -86,7 +99,8 @@ After deployment, update Predict to:
 2. call `place_bet(market_id, side, amount)`
 3. save the tx hash and onchain market id
 4. resolve markets from the oracle rail
-5. let winners call `claim`
+5. auto-claim winnings for winners through the resolver account
+6. keep user claim as a fallback
 
 ## Your part
 
