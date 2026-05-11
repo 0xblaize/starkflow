@@ -1,33 +1,33 @@
-name: Predict Settlement
+# name: Predict Settlement
 
-on:
-  schedule:
-    - cron: "15 * * * *"
-  workflow_dispatch:
+# on:
+#   schedule:
+#     - cron: "15 * * * *"
+#   workflow_dispatch:
 
-jobs:
-  settle:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+# jobs:
+#   settle:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 10
 
-    steps:
-      - name: Trigger prediction settlement
-        env:
-          PREDICT_SETTLE_CRON_SECRET: ${{ secrets.PREDICT_SETTLE_CRON_SECRET }}
-          PREDICT_SETTLE_URL: ${{ secrets.PREDICT_SETTLE_URL }}
-        run: |
-          if [ -z "$PREDICT_SETTLE_URL" ]; then
-            echo "Missing PREDICT_SETTLE_URL secret"
-            exit 1
-          fi
+#     steps:
+#       - name: Trigger prediction settlement
+#         env:
+#           PREDICT_SETTLE_CRON_SECRET: ${{ secrets.PREDICT_SETTLE_CRON_SECRET }}
+#           PREDICT_SETTLE_URL: ${{ secrets.PREDICT_SETTLE_URL }}
+#         run: |
+#           if [ -z "$PREDICT_SETTLE_URL" ]; then
+#             echo "Missing PREDICT_SETTLE_URL secret"
+#             exit 1
+#           fi
 
-          if [ -z "$PREDICT_SETTLE_CRON_SECRET" ]; then
-            echo "Missing PREDICT_SETTLE_CRON_SECRET secret"
-            exit 1
-          fi
+#           if [ -z "$PREDICT_SETTLE_CRON_SECRET" ]; then
+#             echo "Missing PREDICT_SETTLE_CRON_SECRET secret"
+#             exit 1
+#           fi
 
-          curl --fail-with-body \
-            --request POST \
-            --header "Authorization: Bearer $PREDICT_SETTLE_CRON_SECRET" \
-            --header "Content-Type: application/json" \
-            "$PREDICT_SETTLE_URL"
+#           curl --fail-with-body \
+#             --request POST \
+#             --header "Authorization: Bearer $PREDICT_SETTLE_CRON_SECRET" \
+#             --header "Content-Type: application/json" \
+#             "$PREDICT_SETTLE_URL"
